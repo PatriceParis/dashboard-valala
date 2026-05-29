@@ -137,7 +137,7 @@ export function OutboundSection({ data }: Props) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
               <XAxis
                 dataKey="date"
-                tickFormatter={(d: string) => formatShortDate(d)}
+                tickFormatter={(d) => formatShortDate(String(d ?? ""))}
                 tick={{ fill: "rgba(255,255,255,0.5)", fontSize: 11 }}
                 axisLine={false}
               />
@@ -149,7 +149,7 @@ export function OutboundSection({ data }: Props) {
                   borderRadius: 6,
                   fontSize: 12,
                 }}
-                labelFormatter={(v: string) => formatShortDate(v)}
+                labelFormatter={(v) => (typeof v === "string" ? formatShortDate(v) : String(v ?? ""))}
               />
               <Area
                 type="monotone"
