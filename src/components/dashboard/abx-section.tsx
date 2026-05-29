@@ -88,9 +88,9 @@ export function ABXSection({ data, currency }: Props) {
           <Money label="Pipeline" value={formatCurrency(funnel.pipelineEUR, currency)} />
           <Money label="Revenue won" value={formatCurrency(funnel.revenueEUR, currency)} />
           <Money
-            label="ROAS"
+            label="ROAS (90j)"
             value={funnel.spendEUR > 0 ? `${roas.toFixed(2)}x` : "—"}
-            sub={`Spend ${formatCurrency(funnel.spendEUR, currency)}`}
+            sub={`Dépenses 90j ${formatCurrency(funnel.spendEUR, currency)}`}
           />
         </div>
       </div>

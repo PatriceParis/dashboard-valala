@@ -29,6 +29,12 @@ interface CompanyAnalyticsFile {
     spend: number;
   }>;
 }
+interface CampaignAnalyticsFile {
+  campaignId: string;
+  costInLocalCurrency: number;
+  impressions: number;
+  clicks: number;
+}
 interface OutboundFile {
   campaigns: Array<{ id: string; name: string }>;
   dailyActivity: unknown[];
@@ -293,8 +299,19 @@ async function main() {
   }
   console.log(`  ${dealsByCompany.size} companies with deals`);
 
+  // Total paid spend over the same 90j window as ABX matching, computed from
+  // CAMPAIGN-level analytics (not MEMBER_COMPANY pivot) so it matches the
+  // « Dépenses » KPI of the Performance tab over a 90j range.
+  // The MEMBER_COMPANY pivot only attributes ~30% of total spend (uniquement
+  // les impressions où le profil viewer est associé à une LinkedIn company page).
+  const campaignAnalytics = readJson<CampaignAnalyticsFile[]>("analytics.json", []);
+  const totalPaidSpend90j = campaignAnalytics.reduce(
+    (s, c) => s + (c.costInLocalCurrency || 0),
+    0,
+  );
+  console.log(`Total paid spend (90j, CAMPAIGN-level): ${totalPaidSpend90j.toFixed(2)}€`);
+
   const matches: ABXCompanyMatch[] = [];
-  let spendInfluenced = 0;
   // Skip companies whose "name" is just a numeric ID (orgLookup failed for them).
   const isNumericName = (s: string) => /^\d+$/.test(s.trim());
   for (const p of paid) {
@@ -370,7 +387,6 @@ async function main() {
       m.revenueEUR = revenueEUR;
     }
     matches.push(m);
-    spendInfluenced += p.spend;
   }
 
   const funnel: ABXFunnel = {
@@ -380,7 +396,9 @@ async function main() {
     won: matches.filter((m) => m.won).length,
     pipelineEUR: matches.reduce((s, m) => s + (m.pipelineEUR ?? 0), 0),
     revenueEUR: matches.reduce((s, m) => s + (m.revenueEUR ?? 0), 0),
-    spendEUR: spendInfluenced,
+    // Total paid spend 90j (CAMPAIGN-level) — cohérent avec le KPI « Dépenses »
+    // de l'onglet Performance si l'utilisateur sélectionne une période 90j.
+    spendEUR: totalPaidSpend90j,
   };
 
   writeJson("abx.json", {

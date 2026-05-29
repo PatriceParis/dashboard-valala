@@ -75,9 +75,17 @@ export class LemlistClient {
     return this.request(`/campaigns?limit=200`);
   }
 
-  // GET /campaigns/{id}/stats — aggregated stats (sent/open/click/reply/etc.)
-  async getCampaignStats(campaignId: string): Promise<unknown> {
-    return this.request(`/campaigns/${campaignId}/stats`);
+  // GET /campaigns/{id}/stats?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  // NB: les query params startDate + endDate sont OBLIGATOIRES,
+  // sinon → 400 "Bad params".
+  async getCampaignStats(
+    campaignId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<unknown> {
+    return this.request(
+      `/campaigns/${campaignId}/stats?startDate=${startDate}&endDate=${endDate}`,
+    );
   }
 
   // GET /activities?campaignId={id}&startDate={ISO}&endDate={ISO}&limit=100

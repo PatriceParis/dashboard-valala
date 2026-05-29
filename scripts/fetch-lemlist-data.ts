@@ -127,9 +127,11 @@ async function main() {
   // -----------------------------------------------------------
   console.log("[2/3] campaign stats");
   const campaigns: LemlistCampaign[] = [];
+  const startISO = toISODate(startDate);
+  const endISO = toISODate(endDate);
   for (const c of raw) {
     try {
-      const stats = (await client.getCampaignStats(c._id)) as Record<string, number | string>;
+      const stats = (await client.getCampaignStats(c._id, startISO, endISO)) as Record<string, number | string>;
       const num = (v: unknown) =>
         typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) || 0 : 0;
       campaigns.push({

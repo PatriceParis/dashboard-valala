@@ -35,14 +35,26 @@ export function OutboundSection({ data }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("emailsSent");
   const [sortAsc, setSortAsc] = useState(false);
 
-  if (!data || data.campaigns.length === 0) {
+  if (!data) {
     return (
       <div className="card-elev p-6 text-sm">
         <h3 className="text-base font-semibold mb-2">Outbound</h3>
         <p className="muted">
           Aucune donnée lemlist trouvée. Configurer{" "}
           <code className="text-xs">LEMLIST_API_KEY</code> dans les env vars Vercel
-          (Project Settings → Environment Variables) puis relancer un déploiement.
+          puis relancer un déploiement.
+        </p>
+      </div>
+    );
+  }
+  if (data.campaigns.length === 0) {
+    return (
+      <div className="card-elev p-6 text-sm">
+        <h3 className="text-base font-semibold mb-2">Outbound</h3>
+        <p className="muted">
+          Connecté à lemlist (clé valide) mais 0 campagne avec stats sur la période.
+          Vérifier les logs de build (`fetch-lemlist`) — appel `/campaigns/&#123;id&#125;/stats`
+          probablement en erreur (paramètres date obligatoires).
         </p>
       </div>
     );
