@@ -71,7 +71,9 @@ function writeEmpty(reason: string) {
 // emailsReplied: "emailsReplied" | "emailsRepliedFirst"
 // linkedinSent: "linkedinSent" | "linkedinInvited"
 // linkedinAccepted: "linkedinInvitedAccepted"
-function bucketize(t: string | undefined): keyof OutboundDailyActivity | null {
+type NumericBucket = "emailsSent" | "emailsOpened" | "emailsReplied" | "linkedinSent" | "linkedinAccepted";
+
+function bucketize(t: string | undefined): NumericBucket | null {
   if (!t) return null;
   const x = t.toLowerCase();
   if (x.includes("emailsent") || x === "emailssent") return "emailsSent";
@@ -177,7 +179,7 @@ async function main() {
         if (!iso) continue;
         const bucket = bucketize(a.type);
         if (!bucket) continue;
-        const cur =
+        const cur: OutboundDailyActivity =
           daily.get(iso) ?? {
             date: iso,
             emailsSent: 0,
@@ -186,7 +188,7 @@ async function main() {
             linkedinSent: 0,
             linkedinAccepted: 0,
           };
-        cur[bucket] = (cur[bucket] as number) + 1;
+        cur[bucket] += 1;
         daily.set(iso, cur);
         totalActivities++;
       }

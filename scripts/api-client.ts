@@ -245,13 +245,12 @@ export class LinkedInClient {
   }
 
   // Lookup organization names (public, no r_organization_admin needed for basic name)
+  // NB: `projection` parameter is NOT allowed here (returns 400) — fetch full record.
   async organizationLookup(orgIds: string[]): Promise<unknown> {
     if (orgIds.length === 0) return { results: {} };
     const urns = orgIds.map((id) => `urn:li:organization:${id}`);
     const ids = encodeListUrns(urns);
-    return this.request(
-      `/rest/organizationsLookup?ids=${ids}&projection=(results*(localizedName,vanityName,name))`,
-    );
+    return this.request(`/rest/organizationsLookup?ids=${ids}`);
   }
 
   // Analytics — pivot=CAMPAIGN, granularity=DAILY
