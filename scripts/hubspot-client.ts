@@ -75,6 +75,8 @@ export class HubSpotClient {
   }
 
   // POST /crm/v3/objects/deals/search
+  // NB: `associations` is NOT reliably populated in search responses — use
+  // `batchReadDealCompanyAssociations` afterwards for the real associations.
   async searchDeals(body: {
     filterGroups?: unknown[];
     properties?: string[];
@@ -83,6 +85,16 @@ export class HubSpotClient {
     after?: string;
   }): Promise<unknown> {
     return this.request(`/crm/v3/objects/deals/search`, "POST", body);
+  }
+
+  // POST /crm/v4/associations/deals/companies/batch/read
+  // Returns `{results: [{from: {id}, to: [{toObjectId, associationTypes}]}]}`.
+  // Up to 1000 inputs per call.
+  async batchReadDealCompanyAssociations(dealIds: string[]): Promise<unknown> {
+    if (dealIds.length === 0) return { results: [] };
+    return this.request(`/crm/v4/associations/deals/companies/batch/read`, "POST", {
+      inputs: dealIds.map((id) => ({ id })),
+    });
   }
 
   // Generic page reader: yields all results across cursor pages.

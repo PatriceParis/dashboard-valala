@@ -235,7 +235,7 @@ async function main() {
           "hs_is_closed",
           "hs_is_closed_won",
         ],
-        associations: ["companies"],
+        // (associations populated separately via batchReadDealCompanyAssociations)
         limit: 100,
         after,
       })) as { results?: HSDeal[]; paging?: { next?: { after?: string } } };
@@ -266,16 +266,32 @@ async function main() {
     if (norm.length >= 3) hsByNormName.set(norm, c);
   }
 
-  // Deals by company
+  // Deals by company — the search response doesn't reliably populate associations,
+  // so we explicitly batch-read the deal↔company associations via the v4 API.
   const dealsByCompany = new Map<string, HSDeal[]>();
-  for (const d of deals) {
-    const ids = d.associations?.companies?.results ?? [];
-    for (const a of ids) {
-      const arr = dealsByCompany.get(a.id) ?? [];
-      arr.push(d);
-      dealsByCompany.set(a.id, arr);
+  const dealById = new Map(deals.map((d) => [d.id, d]));
+  for (const batchIds of (function* chunkIds(arr: string[], size: number) {
+    for (let i = 0; i < arr.length; i += size) yield arr.slice(i, i + size);
+  })(deals.map((d) => d.id), 100)) {
+    try {
+      const res = (await hub.batchReadDealCompanyAssociations(batchIds)) as {
+        results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string }> }>;
+      };
+      for (const r of res.results ?? []) {
+        const d = dealById.get(r.from.id);
+        if (!d) continue;
+        for (const t of r.to) {
+          const companyId = String(t.toObjectId);
+          const arr = dealsByCompany.get(companyId) ?? [];
+          arr.push(d);
+          dealsByCompany.set(companyId, arr);
+        }
+      }
+    } catch (err) {
+      console.warn(`  batchReadDealCompanyAssociations failed:`, (err as Error).message);
     }
   }
+  console.log(`  ${dealsByCompany.size} companies with deals`);
 
   const matches: ABXCompanyMatch[] = [];
   let spendInfluenced = 0;
