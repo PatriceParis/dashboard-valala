@@ -292,7 +292,13 @@ export function DashboardShell({ data }: DashboardShellProps) {
 
       {activeTab === "abx" && (
         <div className="mt-4">
-          <ABXSection data={data.abx} currency={data.currency} />
+          <ABXSection
+            data={data.abx}
+            currency={data.currency}
+            dailyAnalytics={dailyForChart}
+            start={range.start}
+            end={range.end}
+          />
         </div>
       )}
 

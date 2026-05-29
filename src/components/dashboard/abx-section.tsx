@@ -1,23 +1,41 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ABXData } from "@/lib/types";
+import type { ABXData, DailyAnalytics } from "@/lib/types";
 import { formatCurrency, formatNumber, formatPercentage } from "@/lib/utils";
 
 interface Props {
   data?: ABXData;
   currency: string;
+  /** Daily analytics filtered to currently visible campaigns (mêmes filtres que KPI grid). */
+  dailyAnalytics: DailyAnalytics[];
+  /** Start/end of the period selected in the header (YYYY-MM-DD). */
+  start: string;
+  end: string;
 }
 
 type SortKey = "name" | "confidence" | "pipelineEUR" | "revenueEUR";
 
 /**
- * ABX — matching cross-source + funnel d'influence
- * (cf. skill § Périmètre / 3. Matching ABX, guide multi-source).
+ * ABX — matching cross-source + funnel d'influence.
+ * NB : le matching paid↔CRM est calculé au build sur 90j (snapshot).
+ * Le `spend` et le `ROAS` sont, eux, **dynamiques** : ils reflètent
+ * la période sélectionnée dans l'en-tête du dashboard (= même valeur
+ * que le KPI « Dépenses » de l'onglet Performance).
  */
-export function ABXSection({ data, currency }: Props) {
+export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("revenueEUR");
   const [sortAsc, setSortAsc] = useState(false);
+
+  // Spend dynamique aligné sur la période sélectionnée (même calcul que KPI Dépenses).
+  const dynamicSpend = useMemo(() => {
+    let sum = 0;
+    for (const d of dailyAnalytics) {
+      if (d.date < start || d.date > end) continue;
+      sum += d.costInLocalCurrency;
+    }
+    return sum;
+  }, [dailyAnalytics, start, end]);
 
   if (!data || data.matches.length === 0) {
     return (
@@ -35,7 +53,7 @@ export function ABXSection({ data, currency }: Props) {
   const { funnel } = data;
   const conversionRate = funnel.reached > 0 ? funnel.inCRM / funnel.reached : 0;
   const winRate = funnel.inCRM > 0 ? funnel.won / funnel.inCRM : 0;
-  const roas = funnel.spendEUR > 0 ? funnel.revenueEUR / funnel.spendEUR : 0;
+  const roas = dynamicSpend > 0 ? funnel.revenueEUR / dynamicSpend : 0;
 
   const rows = useMemo(() => {
     return [...data.matches].sort((a, b) => {
@@ -88,11 +106,16 @@ export function ABXSection({ data, currency }: Props) {
           <Money label="Pipeline" value={formatCurrency(funnel.pipelineEUR, currency)} />
           <Money label="Revenue won" value={formatCurrency(funnel.revenueEUR, currency)} />
           <Money
-            label="ROAS (90j)"
-            value={funnel.spendEUR > 0 ? `${roas.toFixed(2)}x` : "—"}
-            sub={`Dépenses 90j ${formatCurrency(funnel.spendEUR, currency)}`}
+            label="ROAS"
+            value={dynamicSpend > 0 ? `${roas.toFixed(2)}x` : "—"}
+            sub={`Dépenses ${formatCurrency(dynamicSpend, currency)} (période sélectionnée)`}
           />
         </div>
+        <p className="text-[10px] muted mt-2">
+          Funnel calculé sur les entreprises atteintes en 90 j (snapshot ABX). Le
+          ROAS et les dépenses utilisent la période sélectionnée dans l&apos;en-tête
+          — cohérents avec le KPI « Dépenses ».
+        </p>
       </div>
 
       {/* Companies table */}
