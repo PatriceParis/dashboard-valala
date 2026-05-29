@@ -114,8 +114,10 @@ export function OutboundSection({ data }: Props) {
 
   const openRate = totals.emailsSent > 0 ? totals.emailsOpened / totals.emailsSent : 0;
   const replyRate = totals.emailsSent > 0 ? totals.emailsReplied / totals.emailsSent : 0;
-  const acceptRate =
-    totals.linkedinSent > 0 ? totals.linkedinAccepted / totals.linkedinSent : 0;
+  // NB: pas de % d'acceptation affiché — le dénominateur « invitations envoyées »
+  // n'est pas exposé au top-level de l'API lemlist v2 (`perChannel.linkedin.sent`
+  // compte les **messages chat**, pas les **invitations**). À recomposer en
+  // sommant `steps[?].invited` si on veut un vrai taux (à faire en V2).
 
   return (
     <div className="space-y-4">
@@ -124,10 +126,18 @@ export function OutboundSection({ data }: Props) {
         <Kpi label="Emails envoyés" value={formatNumber(totals.emailsSent)} />
         <Kpi label="Ouvertures" value={formatNumber(totals.emailsOpened)} sub={formatPercentage(openRate)} />
         <Kpi label="Réponses" value={formatNumber(totals.emailsReplied)} sub={formatPercentage(replyRate)} />
-        <Kpi label="Invits LinkedIn" value={formatNumber(totals.linkedinSent)} />
-        <Kpi label="Acceptées" value={formatNumber(totals.linkedinAccepted)} sub={formatPercentage(acceptRate)} />
+        <Kpi
+          label="Messages LinkedIn"
+          value={formatNumber(totals.linkedinSent)}
+          sub="chat (hors invits)"
+        />
+        <Kpi label="Invits acceptées" value={formatNumber(totals.linkedinAccepted)} />
         <Kpi label="Leads" value={formatNumber(totals.leadsTotal)} />
-        <Kpi label="MQL / SQL / Deal" value={`${totals.mqlCount} / ${totals.sqlCount} / ${totals.dealCount}`} />
+        <Kpi
+          label="Intéressés / Répondus / RDV"
+          value={`${totals.mqlCount} / ${totals.sqlCount} / ${totals.dealCount}`}
+          sub="source : lemlist (proxy)"
+        />
       </div>
 
       {/* Activity chart */}
@@ -196,11 +206,11 @@ export function OutboundSection({ data }: Props) {
                 {header("emailsSent", "Envoyés")}
                 {header("emailsOpened", "Ouverts")}
                 {header("emailsReplied", "Réponses")}
-                {header("linkedinSent", "LI envoyés")}
-                {header("linkedinAccepted", "LI acceptés")}
-                {header("mqlCount", "MQL")}
-                {header("sqlCount", "SQL")}
-                {header("dealCount", "Deal")}
+                {header("linkedinSent", "LI msgs")}
+                {header("linkedinAccepted", "Invits OK")}
+                {header("mqlCount", "Intéressés")}
+                {header("sqlCount", "Répondus")}
+                {header("dealCount", "RDV")}
               </tr>
             </thead>
             <tbody>
