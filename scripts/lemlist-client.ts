@@ -75,7 +75,14 @@ export class LemlistClient {
     return this.request(`/campaigns?limit=200`);
   }
 
-  // GET /campaigns/{id}/stats?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  // GET /v2/campaigns/{id}/stats?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  // **V2** endpoint : retourne la structure NESTED riche
+  //   { leadMetrics:{ total, reached, interested, … },
+  //     messageMetrics:{ sent, delivered, opened, replied, clicked, bounced,
+  //                       perChannel:{ email:{…}, linkedin:{…}, … } },
+  //     channelMetrics:{ linkedinInvitationAccepted, meetingBooked } }
+  // (Le V1 `/campaigns/{id}/stats` retourne une structure plate legacy avec
+  //  seulement emailsSent / emailsOpened — incomplet pour notre usage.)
   // NB: les query params startDate + endDate sont OBLIGATOIRES,
   // sinon → 400 "Bad params".
   async getCampaignStats(
@@ -84,7 +91,7 @@ export class LemlistClient {
     endDate: string,
   ): Promise<unknown> {
     return this.request(
-      `/campaigns/${campaignId}/stats?startDate=${startDate}&endDate=${endDate}`,
+      `/v2/campaigns/${campaignId}/stats?startDate=${startDate}&endDate=${endDate}`,
     );
   }
 

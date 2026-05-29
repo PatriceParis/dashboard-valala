@@ -129,32 +129,53 @@ async function main() {
   const campaigns: LemlistCampaign[] = [];
   const startISO = toISODate(startDate);
   const endISO = toISODate(endDate);
+  // V2 stats response shape (verified via lemlist MCP get_campaigns_stats):
+  //   leadMetrics: { total, launched, reached, opened, interacted, answered,
+  //                   interested, notInterested, unsubscribed, interrupted }
+  //   messageMetrics: { sent, delivered, opened, replied, clicked, bounced,
+  //                      perChannel: { email:{ sent, delivered, opened, clicked,
+  //                                              replied, bounced, unsubscribed },
+  //                                    linkedin:{ sent, delivered, opened,
+  //                                                replied, invitationAccepted } } }
+  //   channelMetrics: { linkedinInvitationAccepted, meetingBooked }
+  interface PerChannelEmail { sent?: number; opened?: number; replied?: number; bounced?: number }
+  interface PerChannelLinkedIn { sent?: number; replied?: number; invitationAccepted?: number }
+  interface V2Stats {
+    leadMetrics?: { total?: number; reached?: number; interested?: number; answered?: number };
+    messageMetrics?: {
+      sent?: number;
+      opened?: number;
+      replied?: number;
+      perChannel?: { email?: PerChannelEmail; linkedin?: PerChannelLinkedIn };
+    };
+    channelMetrics?: { linkedinInvitationAccepted?: number; meetingBooked?: number };
+  }
   for (const c of raw) {
     try {
-      const stats = (await client.getCampaignStats(c._id, startISO, endISO)) as Record<string, number | string>;
+      const stats = (await client.getCampaignStats(c._id, startISO, endISO)) as V2Stats;
       const num = (v: unknown) =>
         typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) || 0 : 0;
-      // Field names per lemlist API (verified empirically):
-      //   emailsSent / emailsOpened / emailsClicked / emailsReplied / emailsBounced
-      //   linkedinInvited / linkedinAccepted / linkedinReplied / linkedinMessageSent
-      //   contactsContacted / contactsOpened / contactsReplied
-      //   meetingsBooked
-      // ABX fields (mqlCount/sqlCount/dealCount) sont des compteurs custom non
-      // standards — laissés à 0 si absents du payload.
+      const email = stats.messageMetrics?.perChannel?.email ?? {};
+      const linkedin = stats.messageMetrics?.perChannel?.linkedin ?? {};
       campaigns.push({
         id: c._id,
         name: c.name,
         status: c.status ?? "running",
-        emailsSent: num(stats.emailsSent),
-        emailsOpened: num(stats.emailsOpened),
-        emailsReplied: num(stats.emailsReplied),
-        linkedinSent: num(stats.linkedinInvited ?? stats.linkedinMessageSent),
-        linkedinAccepted: num(stats.linkedinAccepted),
-        linkedinReplied: num(stats.linkedinReplied),
-        leadsTotal: num(stats.contactsContacted ?? stats.totalLeads),
-        mqlCount: num(stats.mqlCount),
-        sqlCount: num(stats.sqlCount),
-        dealCount: num(stats.dealCount ?? stats.meetingsBooked),
+        emailsSent: num(email.sent),
+        emailsOpened: num(email.opened),
+        emailsReplied: num(email.replied),
+        linkedinSent: num(linkedin.sent),
+        linkedinAccepted: num(
+          linkedin.invitationAccepted ?? stats.channelMetrics?.linkedinInvitationAccepted,
+        ),
+        linkedinReplied: num(linkedin.replied),
+        leadsTotal: num(stats.leadMetrics?.total),
+        // MQL proxy = "interested" (lead a explicitement répondu OK)
+        mqlCount: num(stats.leadMetrics?.interested),
+        // SQL proxy = "answered" (réponse au moins une fois)
+        sqlCount: num(stats.leadMetrics?.answered),
+        // Deal proxy = meeting booked (rendez-vous pris)
+        dealCount: num(stats.channelMetrics?.meetingBooked),
       });
     } catch (err) {
       console.warn(`  stats failed for ${c._id}:`, (err as Error).message);
