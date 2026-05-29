@@ -158,6 +158,102 @@ export class LinkedInClient {
     return this.request(url);
   }
 
+  // Analytics — pivot=CREATIVE, granularity=ALL (CTR by creative over window)
+  async getCreativeAnalytics(
+    campaignUrns: string[],
+    start: { year: number; month: number; day: number },
+    end: { year: number; month: number; day: number },
+  ): Promise<unknown> {
+    if (campaignUrns.length === 0) return { elements: [] };
+    const fields = [
+      "pivotValues",
+      "dateRange",
+      "impressions",
+      "clicks",
+      "costInLocalCurrency",
+      "oneClickLeads",
+      "totalEngagements",
+      "videoViews",
+      "videoFirstQuartileCompletions",
+      "videoMidpointCompletions",
+    ].join(",");
+    const campaignsParam = encodeListUrns(campaignUrns);
+    const url =
+      `/rest/adAnalytics?q=analytics` +
+      `&pivot=CREATIVE` +
+      `&timeGranularity=ALL` +
+      `&dateRange=(start:(year:${start.year},month:${start.month},day:${start.day}),end:(year:${end.year},month:${end.month},day:${end.day}))` +
+      `&campaigns=${campaignsParam}` +
+      `&fields=${fields}`;
+    return this.request(url);
+  }
+
+  // Analytics — pivot=MEMBER_COMPANY, granularity=ALL (DAILY = bug, returns 0 clicks)
+  async getCompanyAnalytics(
+    campaignUrns: string[],
+    start: { year: number; month: number; day: number },
+    end: { year: number; month: number; day: number },
+  ): Promise<unknown> {
+    if (campaignUrns.length === 0) return { elements: [] };
+    const fields = [
+      "pivotValues",
+      "dateRange",
+      "impressions",
+      "clicks",
+      "costInLocalCurrency",
+    ].join(",");
+    const campaignsParam = encodeListUrns(campaignUrns);
+    const url =
+      `/rest/adAnalytics?q=analytics` +
+      `&pivot=MEMBER_COMPANY` +
+      `&timeGranularity=ALL` +
+      `&dateRange=(start:(year:${start.year},month:${start.month},day:${start.day}),end:(year:${end.year},month:${end.month},day:${end.day}))` +
+      `&campaigns=${campaignsParam}` +
+      `&fields=${fields}`;
+    return this.request(url);
+  }
+
+  // Creatives — list creatives for an ad account
+  async getCreatives(accountId: string): Promise<unknown> {
+    return this.request(
+      `/rest/adAccounts/${accountId}/creatives?q=criteria&count=200`,
+    );
+  }
+
+  // Single creative by ID (with account scope) — used to fetch reference URN
+  async getCreative(accountId: string, creativeId: string): Promise<unknown> {
+    return this.request(`/rest/adAccounts/${accountId}/creatives/${creativeId}`);
+  }
+
+  // Post by share URN (often 403 for ghost posts → TLA fallback workflow)
+  async getPost(shareUrn: string): Promise<unknown> {
+    const encoded = encodeURIComponent(shareUrn);
+    return this.request(`/rest/posts/${encoded}`);
+  }
+
+  // Posts authored by a member (TLA fallback: ghost post matched by share URN)
+  async getPostsByAuthor(memberId: string, count = 50): Promise<unknown> {
+    const author = encodeURIComponent(`urn:li:member:${memberId}`);
+    return this.request(`/rest/posts?q=author&author=${author}&count=${count}`);
+  }
+
+  // Image by URN — list batch
+  async getImagesBatch(imageUrns: string[]): Promise<unknown> {
+    if (imageUrns.length === 0) return { results: {} };
+    const ids = encodeListUrns(imageUrns);
+    return this.request(`/rest/images?ids=${ids}`);
+  }
+
+  // Lookup organization names (public, no r_organization_admin needed for basic name)
+  async organizationLookup(orgIds: string[]): Promise<unknown> {
+    if (orgIds.length === 0) return { results: {} };
+    const urns = orgIds.map((id) => `urn:li:organization:${id}`);
+    const ids = encodeListUrns(urns);
+    return this.request(
+      `/rest/organizationsLookup?ids=${ids}&projection=(results*(localizedName,vanityName,name))`,
+    );
+  }
+
   // Analytics — pivot=CAMPAIGN, granularity=DAILY
   async getDailyCampaignAnalytics(
     campaignUrns: string[],

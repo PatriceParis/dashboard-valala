@@ -75,11 +75,61 @@ export interface AccountOrg {
   followerCount: number;
 }
 
+export interface Creative {
+  id: string;
+  campaignId: string;
+  campaignName?: string;
+  campaignGroupName?: string;
+  status: string;
+  type?: string;
+  /** post URN if Sponsored Update, ghost share URN otherwise */
+  reference?: string;
+  /** preview text/headline if available */
+  text?: string;
+  /** thumbnail URL (image creative or video thumbnail) */
+  imageUrl?: string;
+  /** linkedin permalink of the post (when resolvable) */
+  postUrl?: string;
+  /** author display name (TLA) */
+  authorName?: string;
+}
+
+export interface CreativeAnalytics {
+  creativeId: string;
+  impressions: number;
+  clicks: number;
+  costInLocalCurrency: number;
+  oneClickLeads: number;
+  totalEngagements: number;
+  videoViews?: number;
+  videoFirstQuartileCompletions?: number;
+  videoMidpointCompletions?: number;
+}
+
+export interface CompanyEntry {
+  /** organization URN id (numeric) */
+  orgId: string;
+  name: string;
+  vanityName?: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+}
+
+export interface CompanyAnalytics {
+  /** per-window aggregation: 7d / 30d / 90d */
+  window: "7d" | "30d" | "90d";
+  entries: CompanyEntry[];
+}
+
 export interface DashboardData {
   campaignGroups: CampaignGroup[];
   campaigns: Campaign[];
   analytics: CampaignAnalytics[];
   dailyAnalytics: DailyAnalytics[];
+  creatives: Creative[];
+  creativeAnalytics: CreativeAnalytics[];
+  companyAnalyticsWindows: CompanyAnalytics[];
   accountOrg?: AccountOrg;
   lastUpdated: string;
   dataPeriod?: {
@@ -87,8 +137,89 @@ export interface DashboardData {
     end: string;
   };
   currency: string;
-  // TODO V2: outbound?: OutboundData
-  // TODO V3: abx?: ABXData
+  outbound?: OutboundData;
+  abx?: ABXData;
+}
+
+// ============================================================
+// V2 — Outbound (lemlist)
+// ============================================================
+
+export interface LemlistCampaign {
+  id: string;
+  name: string;
+  status: string;
+  /** stats aggregated from lemlist activities */
+  emailsSent: number;
+  emailsOpened: number;
+  emailsReplied: number;
+  linkedinSent: number;
+  linkedinAccepted: number;
+  linkedinReplied: number;
+  leadsTotal: number;
+  /** ABX field counts from lemlist custom fields when present */
+  mqlCount: number;
+  sqlCount: number;
+  dealCount: number;
+}
+
+export interface OutboundDailyActivity {
+  date: string;
+  emailsSent: number;
+  emailsOpened: number;
+  emailsReplied: number;
+  linkedinSent: number;
+  linkedinAccepted: number;
+}
+
+export interface OutboundData {
+  campaigns: LemlistCampaign[];
+  dailyActivity: OutboundDailyActivity[];
+  lastUpdated: string;
+}
+
+// ============================================================
+// V3 — ABX matching (HubSpot ↔ LinkedIn + lemlist)
+// ============================================================
+
+export interface ABXCompanyMatch {
+  /** canonical company id (built from domain or LinkedIn slug) */
+  id: string;
+  name: string;
+  domain?: string;
+  linkedinSlug?: string;
+  /** sources that touched the company */
+  sources: Array<"paid" | "outbound">;
+  /** match confidence: domain=1.0, slug=0.9, fuzzy=score */
+  confidence: number;
+  matchKind: "domain" | "slug" | "fuzzy";
+  /** funnel position */
+  reached: boolean;
+  inCRM: boolean;
+  quoted: boolean;
+  won: boolean;
+  /** amounts */
+  pipelineEUR?: number;
+  revenueEUR?: number;
+  /** first CRM entry date (used for paid-influenced filter) */
+  firstCRMDate?: string;
+}
+
+export interface ABXFunnel {
+  reached: number;
+  inCRM: number;
+  quoted: number;
+  won: number;
+  pipelineEUR: number;
+  revenueEUR: number;
+  /** total spend that maps to influenced companies (paid only) */
+  spendEUR: number;
+}
+
+export interface ABXData {
+  matches: ABXCompanyMatch[];
+  funnel: ABXFunnel;
+  lastUpdated: string;
 }
 
 export interface ComputedKPIs {

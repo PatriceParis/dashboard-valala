@@ -12,8 +12,11 @@ import type {
 } from "@/lib/types";
 import { addDays, computeDelta, formatDate, toISODate } from "@/lib/utils";
 import { CampaignTable } from "./campaign-table";
+import { CompaniesTable } from "./companies-table";
+import { CreativesGallery } from "./creatives-gallery";
 import { DateSelector } from "./date-selector";
 import { KpiGrid } from "./kpi-grid";
+import { LinksTable } from "./links-table";
 import { PerformanceChart } from "./performance-chart";
 
 interface DashboardShellProps {
@@ -21,6 +24,40 @@ interface DashboardShellProps {
 }
 
 const ALL_GROUPS = "__all__";
+
+type TabId = "performance" | "creatives" | "companies" | "links";
+
+function Tabs({
+  tabs,
+  active,
+  onChange,
+}: {
+  tabs: Array<{ id: TabId; label: string }>;
+  active: TabId;
+  onChange: (id: TabId) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 mt-6 border-b border-white/10">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          className={`px-4 py-2 text-sm -mb-px border-b-2 ${
+            active === t.id
+              ? "border-white text-white"
+              : "border-transparent muted hover:text-white"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function visibleCreativeCount(data: DashboardData, ids: Set<string>): number {
+  return data.creatives.filter((c) => ids.size === 0 || ids.has(c.campaignId)).length;
+}
 
 const emptyKpi = (current: number, previous: number): KPIWithDelta => ({
   current,
@@ -98,6 +135,7 @@ export function DashboardShell({ data }: DashboardShellProps) {
     end: defaultEnd,
   });
   const [groupFilter, setGroupFilter] = useState<string>(ALL_GROUPS);
+  const [activeTab, setActiveTab] = useState<TabId>("performance");
 
   // Filter campaigns by selected group
   const filteredCampaigns: Campaign[] = useMemo(
@@ -184,24 +222,63 @@ export function DashboardShell({ data }: DashboardShellProps) {
       {/* KPIs */}
       <KpiGrid kpis={kpis} currency={data.currency} />
 
-      {/* Chart + table */}
-      <div className="mt-6 grid grid-cols-1 gap-4">
-        <PerformanceChart
-          dailyAnalytics={dailyForChart}
-          start={range.start}
-          end={range.end}
-        />
-        <CampaignTable
-          campaigns={filteredCampaigns}
-          dailyAnalytics={data.dailyAnalytics}
-          start={range.start}
-          end={range.end}
-          currency={data.currency}
-        />
-      </div>
+      {/* Tabs */}
+      <Tabs
+        tabs={[
+          { id: "performance", label: "Performance" },
+          { id: "creatives", label: `Créatives (${visibleCreativeCount(data, campaignIdSet)})` },
+          { id: "companies", label: "Entreprises" },
+          { id: "links", label: "Liens Ads" },
+        ]}
+        active={activeTab}
+        onChange={setActiveTab}
+      />
 
-      {/* TODO V2: <OutboundSection /> — lemlist KPIs, sequence performance */}
-      {/* TODO V3: <ABXSection /> — cross-source matching, influence funnel, pipeline */}
+      {activeTab === "performance" && (
+        <div className="mt-4 grid grid-cols-1 gap-4">
+          <PerformanceChart
+            dailyAnalytics={dailyForChart}
+            start={range.start}
+            end={range.end}
+          />
+          <CampaignTable
+            campaigns={filteredCampaigns}
+            dailyAnalytics={data.dailyAnalytics}
+            start={range.start}
+            end={range.end}
+            currency={data.currency}
+          />
+        </div>
+      )}
+
+      {activeTab === "creatives" && (
+        <div className="mt-4">
+          <CreativesGallery
+            creatives={data.creatives}
+            creativeAnalytics={data.creativeAnalytics}
+            currency={data.currency}
+            visibleCampaignIds={campaignIdSet}
+          />
+        </div>
+      )}
+
+      {activeTab === "companies" && (
+        <div className="mt-4">
+          <CompaniesTable
+            windows={data.companyAnalyticsWindows}
+            currency={data.currency}
+          />
+        </div>
+      )}
+
+      {activeTab === "links" && (
+        <div className="mt-4">
+          <LinksTable
+            creatives={data.creatives}
+            visibleCampaignIds={campaignIdSet}
+          />
+        </div>
+      )}
 
       <footer className="mt-10 text-xs muted text-center">
         Valala · Dashboard généré le {formatDate(data.lastUpdated)} · Données LinkedIn Ads
