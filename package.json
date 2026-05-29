@@ -1,0 +1,33 @@
+{
+  "name": "dashboard-valala",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "vercel-build": "npm run fetch-data; npm run build",
+    "fetch-data": "tsx scripts/fetch-linkedin-data.ts",
+    "refresh-token": "tsx scripts/auth/refresh-token.ts",
+    "update": "npm run fetch-data && npm run build"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "lucide-react": "^0.577.0",
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@tailwindcss/postcss": "^4.2.1",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^4.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
