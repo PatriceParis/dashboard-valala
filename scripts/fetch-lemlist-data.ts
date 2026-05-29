@@ -134,21 +134,27 @@ async function main() {
       const stats = (await client.getCampaignStats(c._id, startISO, endISO)) as Record<string, number | string>;
       const num = (v: unknown) =>
         typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) || 0 : 0;
+      // Field names per lemlist API (verified empirically):
+      //   emailsSent / emailsOpened / emailsClicked / emailsReplied / emailsBounced
+      //   linkedinInvited / linkedinAccepted / linkedinReplied / linkedinMessageSent
+      //   contactsContacted / contactsOpened / contactsReplied
+      //   meetingsBooked
+      // ABX fields (mqlCount/sqlCount/dealCount) sont des compteurs custom non
+      // standards — laissés à 0 si absents du payload.
       campaigns.push({
         id: c._id,
         name: c.name,
         status: c.status ?? "running",
         emailsSent: num(stats.emailsSent),
-        emailsOpened: num(stats.emailsOpenedDistinct ?? stats.emailsOpened),
-        emailsReplied: num(stats.emailsRepliedDistinct ?? stats.emailsReplied),
-        linkedinSent: num(stats.linkedinInvited),
-        linkedinAccepted: num(stats.linkedinInvitedAccepted),
+        emailsOpened: num(stats.emailsOpened),
+        emailsReplied: num(stats.emailsReplied),
+        linkedinSent: num(stats.linkedinInvited ?? stats.linkedinMessageSent),
+        linkedinAccepted: num(stats.linkedinAccepted),
         linkedinReplied: num(stats.linkedinReplied),
-        leadsTotal: num(stats.totalLeads ?? stats.leadsTotal),
-        // ABX fields: optional — derived from custom field counters when set up in lemlist
+        leadsTotal: num(stats.contactsContacted ?? stats.totalLeads),
         mqlCount: num(stats.mqlCount),
         sqlCount: num(stats.sqlCount),
-        dealCount: num(stats.dealCount),
+        dealCount: num(stats.dealCount ?? stats.meetingsBooked),
       });
     } catch (err) {
       console.warn(`  stats failed for ${c._id}:`, (err as Error).message);
