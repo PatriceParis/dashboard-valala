@@ -445,7 +445,8 @@ async function main() {
     }
   }
 
-  // Resolve org names via organizationsLookup (batched in 50)
+  // Resolve org names via organizationsLookup (batched in 50). The endpoint expects
+  // NUMERIC ids and returns results keyed by those same numeric ids.
   const orgNames = new Map<string, { name: string; vanityName?: string }>();
   const orgIdsArr = Array.from(allOrgIds);
   for (const batch of chunk(orgIdsArr, 50)) {
@@ -453,8 +454,9 @@ async function main() {
       const lookup = (await client.organizationLookup(batch)) as {
         results?: Record<string, { localizedName?: string; vanityName?: string }>;
       };
-      for (const [urn, info] of Object.entries(lookup.results ?? {})) {
-        const id = urn.split(":").pop() ?? "";
+      for (const [key, info] of Object.entries(lookup.results ?? {})) {
+        // Key may already be a numeric id, but defensively strip any prefix.
+        const id = key.includes(":") ? (key.split(":").pop() ?? "") : key;
         if (id) orgNames.set(id, { name: info.localizedName ?? id, vanityName: info.vanityName });
       }
     } catch (err) {

@@ -245,11 +245,12 @@ export class LinkedInClient {
   }
 
   // Lookup organization names (public, no r_organization_admin needed for basic name)
-  // NB: `projection` parameter is NOT allowed here (returns 400) — fetch full record.
+  // NB1: `projection` parameter is NOT allowed here (returns 400) — fetch full record.
+  // NB2: `ids` expects NUMERIC IDs, NOT URNs. URNs trigger:
+  //   400 "NumberFormatException parsing batch key 'urn:li:organization:123'".
   async organizationLookup(orgIds: string[]): Promise<unknown> {
     if (orgIds.length === 0) return { results: {} };
-    const urns = orgIds.map((id) => `urn:li:organization:${id}`);
-    const ids = encodeListUrns(urns);
+    const ids = `List(${orgIds.join(",")})`;
     return this.request(`/rest/organizationsLookup?ids=${ids}`);
   }
 

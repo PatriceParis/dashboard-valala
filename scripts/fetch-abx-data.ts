@@ -114,7 +114,25 @@ function fuzzyScore(a: string, b: string): number {
   if (ta.size === 0 || tb.size === 0) return 0;
   let inter = 0;
   for (const t of ta) if (tb.has(t)) inter++;
-  return inter / Math.max(ta.size, tb.size);
+  // Sørensen-style (intersection / min size) → subset matches count.
+  // Ex: "Decathlon France" vs "Decathlon" → 1 / min(2,1) = 1.0 (instead of 0.5).
+  // Guard against single-token false positives by requiring at least 1 longer-than-3 token.
+  const score = inter / Math.min(ta.size, tb.size);
+  if (score < 0.99) return score;
+  // Perfect score: require at least one substantive token (>3 chars) to avoid
+  // 1-letter or 2-letter matches like "AB" vs "AB Inc".
+  const allTokens = [...ta, ...tb];
+  if (allTokens.some((t) => t.length > 3)) return score;
+  return score * 0.5;
+}
+
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    // Strip combining marks via Unicode property (ASCII-safe in source)
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9]/g, "");
 }
 
 // -------- Main -------------------------------------------------
@@ -232,9 +250,10 @@ async function main() {
   // Step 3 — match paid companies ↔ HubSpot companies
   // -----------------------------------------------------------
   console.log("[3/3] matching");
-  // Build lookup by domain + by linkedin slug
+  // Build lookups: by domain, by LinkedIn slug, by normalized name
   const hsByDomain = new Map<string, HSCompany>();
   const hsBySlug = new Map<string, HSCompany>();
+  const hsByNormName = new Map<string, HSCompany>();
   for (const c of companies) {
     const dom = normalizeDomain(c.properties.domain);
     if (dom) hsByDomain.set(dom, c);
@@ -243,6 +262,8 @@ async function main() {
       const m = li.match(/company\/([^/?]+)/);
       if (m) hsBySlug.set(m[1].toLowerCase(), c);
     }
+    const norm = normalizeName(c.properties.name ?? "");
+    if (norm.length >= 3) hsByNormName.set(norm, c);
   }
 
   // Deals by company
@@ -258,6 +279,8 @@ async function main() {
 
   const matches: ABXCompanyMatch[] = [];
   let spendInfluenced = 0;
+  // Skip companies whose "name" is just a numeric ID (orgLookup failed for them).
+  const isNumericName = (s: string) => /^\d+$/.test(s.trim());
   for (const p of paid) {
     let hs: HSCompany | undefined;
     let kind: "domain" | "slug" | "fuzzy" = "fuzzy";
@@ -273,8 +296,20 @@ async function main() {
         confidence = 0.9;
       }
     }
-    // Pass 2: fuzzy on name
-    if (!hs) {
+    // Pass 2: normalized name exact match
+    if (!hs && !isNumericName(p.name)) {
+      const norm = normalizeName(p.name);
+      if (norm.length >= 3) {
+        const direct = hsByNormName.get(norm);
+        if (direct) {
+          hs = direct;
+          kind = "fuzzy"; // logged as fuzzy but with 1.0 confidence (exact normalized)
+          confidence = 1.0;
+        }
+      }
+    }
+    // Pass 3: fuzzy on name (only if we have a real name, not a number)
+    if (!hs && !isNumericName(p.name)) {
       let bestScore = 0;
       let best: HSCompany | undefined;
       for (const c of companies) {
