@@ -49,7 +49,9 @@ function aggregate(
     agg.impressions += d.impressions;
     agg.clicks += d.clicks;
     agg.spend += d.costInLocalCurrency;
-    agg.leads += d.externalWebsiteConversions;
+    // LinkedIn Lead Gen Forms → `oneClickLeads` (CSV "Prospects").
+    // externalWebsiteConversions = conversions Insight Tag (site externe), métrique séparée.
+    agg.leads += d.oneClickLeads ?? 0;
     agg.engagements += d.totalEngagements;
   }
   return agg;

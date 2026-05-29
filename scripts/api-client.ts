@@ -140,6 +140,9 @@ export class LinkedInClient {
       "externalWebsiteConversions",
       "landingPageClicks",
       "totalEngagements",
+      "oneClickLeads",
+      "oneClickLeadFormOpens",
+      "costPerQualifiedLead",
       "videoFirstQuartileCompletions",
       "videoMidpointCompletions",
     ].join(",");
@@ -170,6 +173,7 @@ export class LinkedInClient {
       "costInLocalCurrency",
       "externalWebsiteConversions",
       "totalEngagements",
+      "oneClickLeads",
       "videoFirstQuartileCompletions",
       "videoMidpointCompletions",
     ].join(",");

@@ -58,6 +58,8 @@ interface CampaignAnalytics {
   externalWebsiteConversions: number;
   landingPageClicks: number;
   totalEngagements: number;
+  oneClickLeads: number;
+  oneClickLeadFormOpens: number;
   videoFirstQuartileCompletions?: number;
   videoMidpointCompletions?: number;
   dateRange?: { start: string; end: string };
@@ -70,6 +72,7 @@ interface DailyAnalytics {
   costInLocalCurrency: number;
   externalWebsiteConversions: number;
   totalEngagements: number;
+  oneClickLeads: number;
   videoFirstQuartileCompletions?: number;
   videoMidpointCompletions?: number;
 }
@@ -86,6 +89,8 @@ interface RawElement {
   externalWebsiteConversions?: number | string;
   landingPageClicks?: number | string;
   totalEngagements?: number | string;
+  oneClickLeads?: number | string;
+  oneClickLeadFormOpens?: number | string;
   videoFirstQuartileCompletions?: number | string;
   videoMidpointCompletions?: number | string;
 }
@@ -232,6 +237,8 @@ async function main() {
         externalWebsiteConversions: num(el.externalWebsiteConversions),
         landingPageClicks: num(el.landingPageClicks),
         totalEngagements: num(el.totalEngagements),
+        oneClickLeads: num(el.oneClickLeads),
+        oneClickLeadFormOpens: num(el.oneClickLeadFormOpens),
         videoFirstQuartileCompletions: num(el.videoFirstQuartileCompletions),
         videoMidpointCompletions: num(el.videoMidpointCompletions),
         dateRange: el.dateRange
@@ -267,6 +274,7 @@ async function main() {
         costInLocalCurrency: num(el.costInLocalCurrency),
         externalWebsiteConversions: num(el.externalWebsiteConversions),
         totalEngagements: num(el.totalEngagements),
+        oneClickLeads: num(el.oneClickLeads),
         videoFirstQuartileCompletions: num(el.videoFirstQuartileCompletions),
         videoMidpointCompletions: num(el.videoMidpointCompletions),
       });

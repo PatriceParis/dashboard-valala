@@ -54,7 +54,8 @@ export function CampaignTable({
       cur.impressions += d.impressions;
       cur.clicks += d.clicks;
       cur.spend += d.costInLocalCurrency;
-      cur.leads += d.externalWebsiteConversions;
+      // LinkedIn Lead Gen Forms → oneClickLeads (CSV "Prospects"). Cf. dashboard-shell.
+      cur.leads += d.oneClickLeads ?? 0;
       byCampaign.set(d.campaignId, cur);
     }
     return campaigns.map((c) => {

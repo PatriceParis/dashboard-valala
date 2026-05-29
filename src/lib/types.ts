@@ -38,9 +38,14 @@ export interface CampaignAnalytics {
   impressions: number;
   clicks: number;
   costInLocalCurrency: number;
+  /** Conversions site externe (Insight Tag). NE PAS confondre avec leads Lead Gen Form. */
   externalWebsiteConversions: number;
   landingPageClicks: number;
   totalEngagements: number;
+  /** Leads collectés via Lead Gen Forms LinkedIn (CSV col "Prospects"). VRAI KPI Leads. */
+  oneClickLeads: number;
+  /** Ouvertures du formulaire Lead Gen Form (avant submit). */
+  oneClickLeadFormOpens: number;
   videoFirstQuartileCompletions?: number;
   videoMidpointCompletions?: number;
   dateRange?: {
@@ -57,6 +62,8 @@ export interface DailyAnalytics {
   costInLocalCurrency: number;
   externalWebsiteConversions: number;
   totalEngagements: number;
+  /** Leads Lead Gen Form journaliers. */
+  oneClickLeads: number;
   videoFirstQuartileCompletions?: number;
   videoMidpointCompletions?: number;
 }
