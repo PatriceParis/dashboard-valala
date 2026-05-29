@@ -11,12 +11,14 @@ import type {
   KPIWithDelta,
 } from "@/lib/types";
 import { addDays, computeDelta, formatDate, toISODate } from "@/lib/utils";
+import { ABXSection } from "./abx-section";
 import { CampaignTable } from "./campaign-table";
 import { CompaniesTable } from "./companies-table";
 import { CreativesGallery } from "./creatives-gallery";
 import { DateSelector } from "./date-selector";
 import { KpiGrid } from "./kpi-grid";
 import { LinksTable } from "./links-table";
+import { OutboundSection } from "./outbound-section";
 import { PerformanceChart } from "./performance-chart";
 
 interface DashboardShellProps {
@@ -25,7 +27,7 @@ interface DashboardShellProps {
 
 const ALL_GROUPS = "__all__";
 
-type TabId = "performance" | "creatives" | "companies" | "links";
+type TabId = "performance" | "creatives" | "companies" | "links" | "outbound" | "abx";
 
 function Tabs({
   tabs,
@@ -229,6 +231,8 @@ export function DashboardShell({ data }: DashboardShellProps) {
           { id: "creatives", label: `Créatives (${visibleCreativeCount(data, campaignIdSet)})` },
           { id: "companies", label: "Entreprises" },
           { id: "links", label: "Liens Ads" },
+          { id: "outbound", label: `Outbound${data.outbound ? ` (${data.outbound.campaigns.length})` : ""}` },
+          { id: "abx", label: `ABX${data.abx ? ` (${data.abx.matches.length})` : ""}` },
         ]}
         active={activeTab}
         onChange={setActiveTab}
@@ -277,6 +281,18 @@ export function DashboardShell({ data }: DashboardShellProps) {
             creatives={data.creatives}
             visibleCampaignIds={campaignIdSet}
           />
+        </div>
+      )}
+
+      {activeTab === "outbound" && (
+        <div className="mt-4">
+          <OutboundSection data={data.outbound} />
+        </div>
+      )}
+
+      {activeTab === "abx" && (
+        <div className="mt-4">
+          <ABXSection data={data.abx} currency={data.currency} />
         </div>
       )}
 
