@@ -129,34 +129,42 @@ async function main() {
   const campaigns: LemlistCampaign[] = [];
   const startISO = toISODate(startDate);
   const endISO = toISODate(endDate);
-  // V2 stats response shape (verified via lemlist MCP get_campaigns_stats):
-  //   leadMetrics: { total, launched, reached, opened, interacted, answered,
-  //                   interested, notInterested, unsubscribed, interrupted }
-  //   messageMetrics: { sent, delivered, opened, replied, clicked, bounced,
-  //                      perChannel: { email:{ sent, delivered, opened, clicked,
-  //                                              replied, bounced, unsubscribed },
-  //                                    linkedin:{ sent, delivered, opened,
-  //                                                replied, invitationAccepted } } }
-  //   channelMetrics: { linkedinInvitationAccepted, meetingBooked }
+  // ⚠️ REST v2 stats response shape (verified via curl, 2026-05-29) :
+  // ATTENTION : la réponse REST BRUTE est différente de celle exposée par le
+  // MCP lemlist `get_campaigns_stats` (qui re-structure en `messageMetrics`/
+  // `leadMetrics`/`channelMetrics`). Le REST direct retourne tout à plat avec
+  // un préfixe `nb*` pour les lead-counters :
+  //   nbLeads, nbLeadsLaunched, nbLeadsReached, nbLeadsOpened,
+  //   nbLeadsInteracted, nbLeadsAnswered, nbLeadsInterested,
+  //   nbLeadsNotInterested, nbLeadsUnsubscribed, nbLeadsInterrupted,
+  //   messagesSent, messagesNotSent, messagesBounced,
+  //   delivered, opened, clicked, replied,
+  //   invitationAccepted, meetingBooked,
+  //   perChannel: {
+  //     email:    { sent, delivered, opened, clicked, replied, bounced, unsubscribed },
+  //     linkedin: { sent, delivered, opened, replied, invitationAccepted }
+  //   }
   interface PerChannelEmail { sent?: number; opened?: number; replied?: number; bounced?: number }
   interface PerChannelLinkedIn { sent?: number; replied?: number; invitationAccepted?: number }
   interface V2Stats {
-    leadMetrics?: { total?: number; reached?: number; interested?: number; answered?: number };
-    messageMetrics?: {
-      sent?: number;
-      opened?: number;
-      replied?: number;
-      perChannel?: { email?: PerChannelEmail; linkedin?: PerChannelLinkedIn };
-    };
-    channelMetrics?: { linkedinInvitationAccepted?: number; meetingBooked?: number };
+    nbLeads?: number;
+    nbLeadsReached?: number;
+    nbLeadsAnswered?: number;
+    nbLeadsInterested?: number;
+    messagesSent?: number;
+    opened?: number;
+    replied?: number;
+    invitationAccepted?: number;
+    meetingBooked?: number;
+    perChannel?: { email?: PerChannelEmail; linkedin?: PerChannelLinkedIn };
   }
   for (const c of raw) {
     try {
       const stats = (await client.getCampaignStats(c._id, startISO, endISO)) as V2Stats;
       const num = (v: unknown) =>
         typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) || 0 : 0;
-      const email = stats.messageMetrics?.perChannel?.email ?? {};
-      const linkedin = stats.messageMetrics?.perChannel?.linkedin ?? {};
+      const email = stats.perChannel?.email ?? {};
+      const linkedin = stats.perChannel?.linkedin ?? {};
       campaigns.push({
         id: c._id,
         name: c.name,
@@ -165,17 +173,15 @@ async function main() {
         emailsOpened: num(email.opened),
         emailsReplied: num(email.replied),
         linkedinSent: num(linkedin.sent),
-        linkedinAccepted: num(
-          linkedin.invitationAccepted ?? stats.channelMetrics?.linkedinInvitationAccepted,
-        ),
+        linkedinAccepted: num(linkedin.invitationAccepted ?? stats.invitationAccepted),
         linkedinReplied: num(linkedin.replied),
-        leadsTotal: num(stats.leadMetrics?.total),
-        // MQL proxy = "interested" (lead a explicitement répondu OK)
-        mqlCount: num(stats.leadMetrics?.interested),
-        // SQL proxy = "answered" (réponse au moins une fois)
-        sqlCount: num(stats.leadMetrics?.answered),
-        // Deal proxy = meeting booked (rendez-vous pris)
-        dealCount: num(stats.channelMetrics?.meetingBooked),
+        leadsTotal: num(stats.nbLeads),
+        // MQL proxy = leads ayant explicitement répondu "intéressé"
+        mqlCount: num(stats.nbLeadsInterested),
+        // SQL proxy = leads ayant répondu au moins une fois
+        sqlCount: num(stats.nbLeadsAnswered),
+        // Deal proxy = rendez-vous pris
+        dealCount: num(stats.meetingBooked),
       });
     } catch (err) {
       console.warn(`  stats failed for ${c._id}:`, (err as Error).message);
