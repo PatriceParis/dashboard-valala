@@ -482,33 +482,79 @@ async function main() {
     matches.push(m);
   }
 
-  // Counts for logs
-  const paidOnlyCount = matches.filter((m) => m.sources.length === 1 && m.sources[0] === "paid").length;
-  const outboundOnlyCount = matches.filter((m) => m.sources.length === 1 && m.sources[0] === "outbound").length;
-  const bothCount = matches.filter((m) => m.sources.length === 2).length;
+  // -----------------------------------------------------------
+  // Step 4 — Dédup par HubSpot ID (Quick Win #1, 2026-06-XX)
+  // -----------------------------------------------------------
+  // Sans ce dédup, une même HubSpot company peut apparaître 2 fois :
+  // - 1 entrée venant du paid (matchée via slug LinkedIn)
+  // - 1 entrée venant de l'outbound (matchée via domain lemlist)
+  // Conséquence : funnel et pipeline EUR sont DOUBLE-COMPTÉS sur ces entreprises.
+  // Le merge consolide les `sources` (≤ "paid" + "outbound" = "both") et garde
+  // la meilleure confidence + le matchKind le plus fiable.
+  //
+  // ⚠️ On ne dédup QUE les entrées qui ont un vrai HubSpot ID (`hs_xxx`).
+  // Les IDs synthétiques `linkedin:{orgId}` et `outbound:{domain}` représentent
+  // des entreprises pas dans le CRM — chacune reste unique côté display.
+  const beforeDedup = matches.length;
+  const dedupedById = new Map<string, ABXCompanyMatch>();
+  const standalone: ABXCompanyMatch[] = [];
+  for (const m of matches) {
+    const isHubspotId = m.inCRM && !m.id.startsWith("linkedin:") && !m.id.startsWith("outbound:");
+    if (!isHubspotId) {
+      standalone.push(m);
+      continue;
+    }
+    const existing = dedupedById.get(m.id);
+    if (!existing) {
+      dedupedById.set(m.id, m);
+      continue;
+    }
+    // Merge : union des sources, max de la confidence, conservation des champs financiers.
+    const mergedSources = Array.from(new Set([...existing.sources, ...m.sources])) as Array<
+      "paid" | "outbound"
+    >;
+    existing.sources = mergedSources;
+    if (m.confidence > existing.confidence) {
+      existing.confidence = m.confidence;
+      existing.matchKind = m.matchKind;
+    }
+    // domain / linkedinSlug : on garde la valeur non-vide la plus complète
+    if (!existing.domain && m.domain) existing.domain = m.domain;
+    if (!existing.linkedinSlug && m.linkedinSlug) existing.linkedinSlug = m.linkedinSlug;
+    // Le pipeline / revenue / quoted / won viennent du même deal HubSpot
+    // (identifié par HubSpot ID), donc identiques entre les 2 entrées : on conserve.
+  }
+  const merged = [...dedupedById.values(), ...standalone];
+  const dedupedCount = beforeDedup - merged.length;
+  console.log(`  Dédup HubSpot ID : ${beforeDedup} → ${merged.length} (${dedupedCount} doublons mergés)`);
+
+  // Counts for logs (after dedup)
+  const paidOnlyCount = merged.filter((m) => m.sources.length === 1 && m.sources[0] === "paid").length;
+  const outboundOnlyCount = merged.filter((m) => m.sources.length === 1 && m.sources[0] === "outbound").length;
+  const bothCount = merged.filter((m) => m.sources.length === 2).length;
   console.log(
     `  Sources: paid-only=${paidOnlyCount}, outbound-only=${outboundOnlyCount}, both=${bothCount}`,
   );
 
   const funnel: ABXFunnel = {
-    reached: matches.filter((m) => m.reached).length,
-    inCRM: matches.filter((m) => m.inCRM).length,
-    quoted: matches.filter((m) => m.quoted).length,
-    won: matches.filter((m) => m.won).length,
-    pipelineEUR: matches.reduce((s, m) => s + (m.pipelineEUR ?? 0), 0),
-    revenueEUR: matches.reduce((s, m) => s + (m.revenueEUR ?? 0), 0),
+    reached: merged.filter((m) => m.reached).length,
+    inCRM: merged.filter((m) => m.inCRM).length,
+    quoted: merged.filter((m) => m.quoted).length,
+    won: merged.filter((m) => m.won).length,
+    pipelineEUR: merged.reduce((s, m) => s + (m.pipelineEUR ?? 0), 0),
+    revenueEUR: merged.reduce((s, m) => s + (m.revenueEUR ?? 0), 0),
     // Total paid spend 90j (CAMPAIGN-level) — cohérent avec le KPI « Dépenses »
     // de l'onglet Performance si l'utilisateur sélectionne une période 90j.
     spendEUR: totalPaidSpend90j,
   };
 
   writeJson("abx.json", {
-    matches,
+    matches: merged,
     funnel,
     lastUpdated: new Date().toISOString(),
   } satisfies ABXData);
   console.log(
-    `  ${matches.length} matches | reached=${funnel.reached} crm=${funnel.inCRM} quoted=${funnel.quoted} won=${funnel.won}`,
+    `  ${merged.length} matches | reached=${funnel.reached} crm=${funnel.inCRM} quoted=${funnel.quoted} won=${funnel.won}`,
   );
   console.log("=== done ===");
 }
