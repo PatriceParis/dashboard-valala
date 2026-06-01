@@ -132,7 +132,6 @@ export function OutboundSection({ data }: Props) {
           sub="chat (hors invits)"
         />
         <Kpi label="Invits acceptées" value={formatNumber(totals.linkedinAccepted)} />
-        <Kpi label="Leads" value={formatNumber(totals.leadsTotal)} />
         <Kpi
           label="Intéressés / Répondus / RDV"
           value={`${totals.mqlCount} / ${totals.sqlCount} / ${totals.dealCount}`}

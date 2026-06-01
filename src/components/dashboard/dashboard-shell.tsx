@@ -17,7 +17,6 @@ import { CompaniesTable } from "./companies-table";
 import { CreativesGallery } from "./creatives-gallery";
 import { DateSelector } from "./date-selector";
 import { KpiGrid } from "./kpi-grid";
-import { LinksTable } from "./links-table";
 import { OutboundSection } from "./outbound-section";
 import { PerformanceChart } from "./performance-chart";
 
@@ -27,7 +26,7 @@ interface DashboardShellProps {
 
 const ALL_GROUPS = "__all__";
 
-type TabId = "performance" | "creatives" | "companies" | "links" | "outbound" | "abx";
+type TabId = "performance" | "creatives" | "companies" | "outbound" | "abx";
 
 function Tabs({
   tabs,
@@ -230,7 +229,6 @@ export function DashboardShell({ data }: DashboardShellProps) {
           { id: "performance", label: "Performance" },
           { id: "creatives", label: `Créatives (${visibleCreativeCount(data, campaignIdSet)})` },
           { id: "companies", label: "Entreprises" },
-          { id: "links", label: "Liens Ads" },
           { id: "outbound", label: `Outbound${data.outbound ? ` (${data.outbound.campaigns.length})` : ""}` },
           { id: "abx", label: `Impact CRM${data.abx ? ` (${data.abx.matches.length})` : ""}` },
         ]}
@@ -271,15 +269,6 @@ export function DashboardShell({ data }: DashboardShellProps) {
           <CompaniesTable
             windows={data.companyAnalyticsWindows}
             currency={data.currency}
-          />
-        </div>
-      )}
-
-      {activeTab === "links" && (
-        <div className="mt-4">
-          <LinksTable
-            creatives={data.creatives}
-            visibleCampaignIds={campaignIdSet}
           />
         </div>
       )}
