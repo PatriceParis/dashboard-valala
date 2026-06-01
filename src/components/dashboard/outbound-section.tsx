@@ -17,15 +17,9 @@ interface Props {
   data?: OutboundData;
 }
 
-type SortKey =
-  | "emailsSent"
-  | "emailsOpened"
-  | "emailsReplied"
-  | "linkedinSent"
-  | "linkedinAccepted"
-  | "mqlCount"
-  | "sqlCount"
-  | "dealCount";
+type SortKey = "emailsSent" | "openRate" | "replyRate";
+
+type TableFilter = "active" | "all";
 
 /**
  * Outbound — lemlist KPIs + chart d'activité + tableau campagnes
@@ -34,6 +28,7 @@ type SortKey =
 export function OutboundSection({ data }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("emailsSent");
   const [sortAsc, setSortAsc] = useState(false);
+  const [tableFilter, setTableFilter] = useState<TableFilter>("active");
 
   if (!data) {
     return (
@@ -87,13 +82,29 @@ export function OutboundSection({ data }: Props) {
     );
   }, [data.campaigns]);
 
+  // Enrichir avec les taux pour tri + affichage
+  const enriched = useMemo(() => {
+    return data.campaigns.map((c) => {
+      const openRate = c.emailsSent > 0 ? c.emailsOpened / c.emailsSent : 0;
+      const replyRate = c.emailsSent > 0 ? c.emailsReplied / c.emailsSent : 0;
+      return { ...c, openRate, replyRate };
+    });
+  }, [data.campaigns]);
+
+  // Filtre actives = avec au moins 1 envoi sur la période
+  const filtered = useMemo(() => {
+    return enriched.filter((c) => tableFilter === "all" || c.emailsSent > 0);
+  }, [enriched, tableFilter]);
+
   const rows = useMemo(() => {
-    return [...data.campaigns].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
       return sortAsc ? av - bv : bv - av;
     });
-  }, [data.campaigns, sortKey, sortAsc]);
+  }, [filtered, sortKey, sortAsc]);
+
+  const hiddenCount = enriched.length - filtered.length;
 
   const setSort = (k: SortKey) => {
     if (k === sortKey) setSortAsc((v) => !v);
@@ -193,54 +204,109 @@ export function OutboundSection({ data }: Props) {
 
       {/* Campaigns table */}
       <div className="card-elev p-4">
-        <h3 className="text-sm font-semibold mb-3">
-          Campagnes lemlist <span className="muted font-normal text-xs">({rows.length})</span>
-        </h3>
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <h3 className="text-sm font-semibold">
+            Campagnes lemlist{" "}
+            <span className="muted font-normal text-xs">
+              ({rows.length}
+              {hiddenCount > 0 && ` · ${hiddenCount} sans envoi masquées`})
+            </span>
+          </h3>
+          <div className="flex items-center gap-1 text-[11px]">
+            <span className="muted mr-1">Afficher :</span>
+            {(
+              [
+                { id: "active", label: "Actives (avec envois)" },
+                { id: "all", label: "Toutes" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setTableFilter(opt.id)}
+                className={`px-3 py-1 rounded ${
+                  tableFilter === opt.id
+                    ? "bg-white/10 text-white"
+                    : "bg-transparent muted hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-xs muted">
+            <thead className="text-xs muted border-b border-white/10">
               <tr>
                 <th className="px-3 py-2 text-left">Campagne</th>
                 <th className="px-3 py-2 text-left">Statut</th>
                 {header("emailsSent", "Envoyés")}
-                {header("emailsOpened", "Ouverts")}
-                {header("emailsReplied", "Réponses")}
-                {header("linkedinSent", "LI msgs")}
-                {header("linkedinAccepted", "Invits OK")}
-                {header("mqlCount", "Intéressés")}
-                {header("sqlCount", "Répondus")}
-                {header("dealCount", "RDV")}
+                {header("openRate", "Ouverture")}
+                {header("replyRate", "Réponse")}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="border-t border-white/5">
-                  <td className="px-3 py-2">{r.name}</td>
-                  <td className="px-3 py-2 text-xs">
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] ${
-                        r.status === "running" || r.status === "ACTIVE"
-                          ? "bg-emerald-500/20 text-emerald-300"
-                          : "bg-white/10 muted"
-                      }`}
-                    >
-                      {r.status}
-                    </span>
+                <tr key={r.id} className="border-t border-white/5 hover:bg-white/[0.02]">
+                  <td className="px-3 py-2 max-w-[420px]">
+                    <div className="truncate" title={r.name}>
+                      {r.name}
+                    </div>
                   </td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.emailsSent)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.emailsOpened)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.emailsReplied)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.linkedinSent)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.linkedinAccepted)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.mqlCount)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.sqlCount)}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.dealCount)}</td>
+                  <td className="px-3 py-2 text-xs">
+                    <StatusBadge status={r.status} />
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {r.emailsSent > 0 ? formatNumber(r.emailsSent) : <span className="muted">—</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <RateCell rate={r.openRate} count={r.emailsOpened} hasBase={r.emailsSent > 0} />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <RateCell rate={r.replyRate} count={r.emailsReplied} hasBase={r.emailsSent > 0} />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {rows.length === 0 && (
+            <div className="text-sm muted text-center py-6">
+              Aucune campagne dans ce filtre.
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const isActive = status === "running" || status === "ACTIVE";
+  return (
+    <span
+      className={`px-2 py-0.5 rounded text-[10px] inline-block ${
+        isActive ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 muted"
+      }`}
+    >
+      {isActive ? "active" : status}
+    </span>
+  );
+}
+
+function RateCell({
+  rate,
+  count,
+  hasBase,
+}: {
+  rate: number;
+  count: number;
+  hasBase: boolean;
+}) {
+  if (!hasBase) return <span className="muted">—</span>;
+  return (
+    <div className="inline-flex flex-col items-end gap-0">
+      <span className="tabular-nums font-medium">{formatPercentage(rate)}</span>
+      <span className="text-[10px] muted tabular-nums">{formatNumber(count)}</span>
     </div>
   );
 }
