@@ -232,7 +232,7 @@ export function DashboardShell({ data }: DashboardShellProps) {
           { id: "companies", label: "Entreprises" },
           { id: "links", label: "Liens Ads" },
           { id: "outbound", label: `Outbound${data.outbound ? ` (${data.outbound.campaigns.length})` : ""}` },
-          { id: "abx", label: `ABX${data.abx ? ` (${data.abx.matches.length})` : ""}` },
+          { id: "abx", label: `Impact CRM${data.abx ? ` (${data.abx.matches.length})` : ""}` },
         ]}
         active={activeTab}
         onChange={setActiveTab}

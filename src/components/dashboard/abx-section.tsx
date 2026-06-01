@@ -7,7 +7,7 @@ import { formatCurrency, formatNumber, formatPercentage } from "@/lib/utils";
 interface Props {
   data?: ABXData;
   currency: string;
-  /** Daily analytics filtered to currently visible campaigns (mêmes filtres que KPI grid). */
+  /** Daily analytics filtered to currently visible campaigns (same filters as KPI grid). */
   dailyAnalytics: DailyAnalytics[];
   /** Start/end of the period selected in the header (YYYY-MM-DD). */
   start: string;
@@ -15,17 +15,18 @@ interface Props {
 }
 
 type SortKey = "name" | "confidence" | "pipelineEUR" | "revenueEUR";
+type SourceFilter = "all" | "paid" | "outbound" | "both";
 
 /**
- * ABX — matching cross-source + funnel d'influence.
- * NB : le matching paid↔CRM est calculé au build sur 90j (snapshot).
- * Le `spend` et le `ROAS` sont, eux, **dynamiques** : ils reflètent
- * la période sélectionnée dans l'en-tête du dashboard (= même valeur
- * que le KPI « Dépenses » de l'onglet Performance).
+ * Impact CRM — matching cross-source (LinkedIn Ads + lemlist outbound) ↔ HubSpot.
+ *
+ * Le funnel est figé sur 90j (snapshot ABX) ; le ROAS et les dépenses utilisent
+ * la période sélectionnée dans l'en-tête (= même valeur que le KPI Dépenses).
  */
 export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("revenueEUR");
   const [sortAsc, setSortAsc] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
 
   // Spend dynamique aligné sur la période sélectionnée (même calcul que KPI Dépenses).
   const dynamicSpend = useMemo(() => {
@@ -40,9 +41,9 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
   if (!data || data.matches.length === 0) {
     return (
       <div className="card-elev p-6 text-sm">
-        <h3 className="text-base font-semibold mb-2">ABX</h3>
+        <h3 className="text-base font-semibold mb-2">Impact CRM</h3>
         <p className="muted">
-          Aucune donnée ABX. Configurer{" "}
+          Aucune donnée d&apos;impact CRM disponible. Configurer{" "}
           <code className="text-xs">HUBSPOT_ACCESS_TOKEN</code> dans les env vars Vercel
           puis relancer un déploiement.
         </p>
@@ -50,13 +51,34 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
     );
   }
 
-  const { funnel } = data;
-  const conversionRate = funnel.reached > 0 ? funnel.inCRM / funnel.reached : 0;
-  const winRate = funnel.inCRM > 0 ? funnel.won / funnel.inCRM : 0;
-  const roas = dynamicSpend > 0 ? funnel.revenueEUR / dynamicSpend : 0;
+  const { funnel, matches } = data;
+
+  // Source counts (totaux non filtrés)
+  const sourceCounts = useMemo(() => {
+    let paid = 0,
+      outbound = 0,
+      both = 0;
+    for (const m of matches) {
+      if (m.sources.length === 2) both++;
+      else if (m.sources[0] === "paid") paid++;
+      else if (m.sources[0] === "outbound") outbound++;
+    }
+    return { paid, outbound, both, total: matches.length };
+  }, [matches]);
+
+  // Filtered rows (sort + source filter)
+  const filteredMatches = useMemo(() => {
+    return matches.filter((m) => {
+      if (sourceFilter === "all") return true;
+      if (sourceFilter === "both") return m.sources.length === 2;
+      if (sourceFilter === "paid") return m.sources.length === 1 && m.sources[0] === "paid";
+      if (sourceFilter === "outbound") return m.sources.length === 1 && m.sources[0] === "outbound";
+      return true;
+    });
+  }, [matches, sourceFilter]);
 
   const rows = useMemo(() => {
-    return [...data.matches].sort((a, b) => {
+    return [...filteredMatches].sort((a, b) => {
       if (sortKey === "name") {
         return sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
       }
@@ -64,7 +86,7 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
       const bv = (sortKey === "confidence" ? b.confidence : b[sortKey] ?? 0) as number;
       return sortAsc ? av - bv : bv - av;
     });
-  }, [data.matches, sortKey, sortAsc]);
+  }, [filteredMatches, sortKey, sortAsc]);
 
   const setSort = (k: SortKey) => {
     if (k === sortKey) setSortAsc((v) => !v);
@@ -83,82 +105,189 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
     </th>
   );
 
+  // Conversions step by step
+  const reachToCrm = funnel.reached > 0 ? funnel.inCRM / funnel.reached : 0;
+  const crmToQuoted = funnel.inCRM > 0 ? funnel.quoted / funnel.inCRM : 0;
+  const quotedToWon = funnel.quoted > 0 ? funnel.won / funnel.quoted : 0;
+  const roas = dynamicSpend > 0 ? funnel.revenueEUR / dynamicSpend : 0;
+  const maxFunnel = Math.max(funnel.reached, 1);
+
   return (
     <div className="space-y-4">
-      {/* Funnel */}
+      {/* ===== Bloc 1 — Funnel visuel ===== */}
+      <div className="card-elev p-5">
+        <div className="flex items-baseline justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h3 className="text-base font-semibold">Funnel d&apos;impact CRM</h3>
+            <p className="text-[11px] muted mt-0.5">
+              Entreprises touchées via LinkedIn Ads + lemlist outbound, croisées avec votre CRM HubSpot.
+            </p>
+          </div>
+          <div className="text-[11px] muted">
+            Snapshot 90 j · {formatNumber(funnel.reached)} entreprises analysées
+          </div>
+        </div>
+
+        {/* Visual funnel — 4 bars decreasing */}
+        <div className="space-y-2">
+          <FunnelBar
+            label="Touchées"
+            sublabel="LinkedIn Ads ou lemlist outbound"
+            count={funnel.reached}
+            rate={1}
+            width={1}
+            color="from-blue-500/40 to-blue-500/10"
+          />
+          <FunnelBar
+            label="Présentes en CRM"
+            sublabel="Match HubSpot (domaine / slug / nom)"
+            count={funnel.inCRM}
+            rate={reachToCrm}
+            width={funnel.inCRM / maxFunnel}
+            color="from-indigo-500/40 to-indigo-500/10"
+            rateLabel={`${formatPercentage(reachToCrm)} des touchées`}
+          />
+          <FunnelBar
+            label="Avec devis"
+            sublabel="Au moins un deal HubSpot ouvert"
+            count={funnel.quoted}
+            rate={crmToQuoted}
+            width={funnel.quoted / maxFunnel}
+            color="from-purple-500/40 to-purple-500/10"
+            rateLabel={`${formatPercentage(crmToQuoted)} du CRM`}
+          />
+          <FunnelBar
+            label="Gagnées"
+            sublabel="Deal closed-won"
+            count={funnel.won}
+            rate={quotedToWon}
+            width={funnel.won / maxFunnel}
+            color="from-emerald-500/40 to-emerald-500/10"
+            rateLabel={`${formatPercentage(quotedToWon)} des devis`}
+          />
+        </div>
+      </div>
+
+      {/* ===== Bloc 2 — KPIs financiers ===== */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <KpiCard
+          label="Pipeline ouvert"
+          value={formatCurrency(funnel.pipelineEUR, currency)}
+          sub={`${formatNumber(funnel.quoted)} entreprises avec devis`}
+          accent="indigo"
+        />
+        <KpiCard
+          label="Revenue gagné"
+          value={formatCurrency(funnel.revenueEUR, currency)}
+          sub={`${formatNumber(funnel.won)} deals closed-won`}
+          accent="emerald"
+        />
+        <KpiCard
+          label="ROAS"
+          value={dynamicSpend > 0 ? `${roas.toFixed(2)}×` : "—"}
+          sub={`Dépenses Ads : ${formatCurrency(dynamicSpend, currency)} (période sélectionnée)`}
+          accent="orange"
+        />
+      </div>
+
+      {/* ===== Bloc 3 — Répartition par source ===== */}
       <div className="card-elev p-4">
-        <h3 className="text-sm font-semibold mb-3">Funnel d&apos;influence</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-          <FunnelStep label="Reached" value={funnel.reached} />
-          <FunnelStep
-            label="In CRM"
-            value={funnel.inCRM}
-            sub={formatPercentage(conversionRate)}
+        <h3 className="text-sm font-semibold mb-3">Répartition par canal d&apos;origine</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <SourceCard
+            label="LinkedIn Ads uniquement"
+            count={sourceCounts.paid}
+            total={sourceCounts.total}
+            color="bg-blue-500/15 text-blue-300 border-blue-500/30"
+            dot="bg-blue-500"
           />
-          <FunnelStep label="Devis" value={funnel.quoted} />
-          <FunnelStep
-            label="Won"
-            value={funnel.won}
-            sub={funnel.inCRM > 0 ? formatPercentage(winRate) : undefined}
+          <SourceCard
+            label="Outbound (lemlist) uniquement"
+            count={sourceCounts.outbound}
+            total={sourceCounts.total}
+            color="bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+            dot="bg-emerald-500"
+          />
+          <SourceCard
+            label="Multi-canal (Paid + Outbound)"
+            count={sourceCounts.both}
+            total={sourceCounts.total}
+            color="bg-purple-500/15 text-purple-300 border-purple-500/30"
+            dot="bg-gradient-to-r from-blue-500 to-emerald-500"
           />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-white/5">
-          <Money label="Pipeline" value={formatCurrency(funnel.pipelineEUR, currency)} />
-          <Money label="Revenue won" value={formatCurrency(funnel.revenueEUR, currency)} />
-          <Money
-            label="ROAS"
-            value={dynamicSpend > 0 ? `${roas.toFixed(2)}x` : "—"}
-            sub={`Dépenses ${formatCurrency(dynamicSpend, currency)} (période sélectionnée)`}
-          />
-        </div>
-        <p className="text-[10px] muted mt-2">
-          Funnel calculé sur les entreprises atteintes en 90 j (snapshot ABX). Le
-          ROAS et les dépenses utilisent la période sélectionnée dans l&apos;en-tête
-          — cohérents avec le KPI « Dépenses ».
+        <p className="text-[10px] muted mt-3">
+          Une entreprise multi-canal a été à la fois touchée par les ads LinkedIn ET contactée via lemlist — signal d&apos;intérêt plus fort.
         </p>
       </div>
 
-      {/* Companies table */}
+      {/* ===== Bloc 4 — Tableau entreprises matchées ===== */}
       <div className="card-elev p-4">
-        <h3 className="text-sm font-semibold mb-3">
-          Entreprises matchées <span className="muted font-normal text-xs">({rows.length})</span>
-        </h3>
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <h3 className="text-sm font-semibold">
+            Entreprises matchées <span className="muted font-normal text-xs">({rows.length} / {sourceCounts.total})</span>
+          </h3>
+          {/* Source filter */}
+          <div className="flex items-center gap-1 text-[11px]">
+            <span className="muted mr-1">Filtre :</span>
+            {(
+              [
+                { id: "all", label: "Toutes" },
+                { id: "paid", label: "LinkedIn Ads" },
+                { id: "outbound", label: "Outbound" },
+                { id: "both", label: "Multi-canal" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setSourceFilter(opt.id)}
+                className={`px-3 py-1 rounded ${
+                  sourceFilter === opt.id
+                    ? "bg-white/10 text-white"
+                    : "bg-transparent muted hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs muted">
               <tr>
                 {header("name", "Entreprise", "left")}
-                <th className="px-3 py-2 text-left">Source</th>
-                <th className="px-3 py-2 text-left">Match</th>
+                <th className="px-3 py-2 text-left">Canal</th>
+                <th className="px-3 py-2 text-left">Match CRM</th>
                 {header("confidence", "Confiance")}
-                <th className="px-3 py-2 text-left">CRM</th>
-                <th className="px-3 py-2 text-left">Devis</th>
-                <th className="px-3 py-2 text-left">Won</th>
+                <th className="px-3 py-2 text-center">Devis</th>
+                <th className="px-3 py-2 text-center">Won</th>
                 {header("pipelineEUR", "Pipeline")}
                 {header("revenueEUR", "Revenue")}
               </tr>
             </thead>
             <tbody>
               {rows.slice(0, 300).map((r) => (
-                <tr key={r.id} className="border-t border-white/5">
-                  <td className="px-3 py-2">{r.name}</td>
+                <tr key={r.id} className="border-t border-white/5 hover:bg-white/[0.02]">
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{r.name}</div>
+                    {r.domain && <div className="text-[10px] muted mt-0.5">{r.domain}</div>}
+                  </td>
+                  <td className="px-3 py-2">
+                    <SourceBadges sources={r.sources} />
+                  </td>
                   <td className="px-3 py-2 text-xs">
-                    {r.sources.map((s) => (
-                      <span
-                        key={s}
-                        className="text-[10px] mr-1 px-2 py-0.5 rounded bg-white/10"
-                      >
-                        {s}
-                      </span>
-                    ))}
+                    {r.inCRM ? (
+                      <span className="text-emerald-300/80">{r.matchKind}</span>
+                    ) : (
+                      <span className="muted">non matchée</span>
+                    )}
                   </td>
-                  <td className="px-3 py-2 text-xs muted">{r.matchKind}</td>
                   <td className="px-3 py-2 text-right text-xs">
-                    {formatPercentage(r.confidence)}
+                    {r.confidence > 0 ? formatPercentage(r.confidence) : "—"}
                   </td>
-                  <td className="px-3 py-2">{r.inCRM ? "✓" : "—"}</td>
-                  <td className="px-3 py-2">{r.quoted ? "✓" : "—"}</td>
-                  <td className="px-3 py-2">{r.won ? "✓" : "—"}</td>
+                  <td className="px-3 py-2 text-center">{r.quoted ? "✓" : ""}</td>
+                  <td className="px-3 py-2 text-center">{r.won ? "✓" : ""}</td>
                   <td className="px-3 py-2 text-right">
                     {r.pipelineEUR ? formatCurrency(r.pipelineEUR, currency) : "—"}
                   </td>
@@ -171,7 +300,7 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
           </table>
           {rows.length > 300 && (
             <div className="text-xs muted mt-3 text-center">
-              {rows.length - 300} entreprises supplémentaires non affichées (limit 300).
+              {rows.length - 300} entreprises supplémentaires non affichées (limite 300).
             </div>
           )}
         </div>
@@ -180,22 +309,122 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
   );
 }
 
-function FunnelStep({ label, value, sub }: { label: string; value: number; sub?: string }) {
+// ============================================================
+// Sub-components
+// ============================================================
+
+function FunnelBar({
+  label,
+  sublabel,
+  count,
+  rate,
+  width,
+  color,
+  rateLabel,
+}: {
+  label: string;
+  sublabel?: string;
+  count: number;
+  rate: number;
+  width: number;
+  color: string;
+  rateLabel?: string;
+}) {
+  const pct = Math.max(0.02, Math.min(1, width)) * 100;
   return (
-    <div className="card-elev p-3">
-      <div className="text-[10px] muted uppercase tracking-wider">{label}</div>
-      <div className="text-base font-semibold mt-1">{formatNumber(value)}</div>
-      {sub && <div className="text-[10px] muted mt-0.5">{sub}</div>}
+    <div className="relative">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div>
+          <span className="text-sm font-semibold">{label}</span>
+          {sublabel && <span className="text-[10px] muted ml-2">{sublabel}</span>}
+        </div>
+        <div className="text-right">
+          <span className="text-sm font-semibold tabular-nums">{formatNumber(count)}</span>
+          {rateLabel && <span className="text-[10px] muted ml-2">{rateLabel}</span>}
+        </div>
+      </div>
+      <div className="h-3 bg-white/[0.04] rounded-full overflow-hidden">
+        <div
+          className={`h-full bg-gradient-to-r ${color} rounded-full transition-all`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
     </div>
   );
 }
 
-function Money({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function KpiCard({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  accent?: "indigo" | "emerald" | "orange";
+}) {
+  const accentClass =
+    accent === "indigo"
+      ? "border-l-indigo-500/60"
+      : accent === "emerald"
+        ? "border-l-emerald-500/60"
+        : accent === "orange"
+          ? "border-l-orange-500/60"
+          : "border-l-white/20";
   return (
-    <div>
+    <div className={`card-elev p-4 border-l-2 ${accentClass}`}>
       <div className="text-[10px] muted uppercase tracking-wider">{label}</div>
-      <div className="text-base font-semibold mt-1">{value}</div>
-      {sub && <div className="text-[10px] muted mt-0.5">{sub}</div>}
+      <div className="text-xl font-semibold mt-1">{value}</div>
+      {sub && <div className="text-[10px] muted mt-1">{sub}</div>}
     </div>
+  );
+}
+
+function SourceCard({
+  label,
+  count,
+  total,
+  color,
+  dot,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  color: string;
+  dot: string;
+}) {
+  const pct = total > 0 ? count / total : 0;
+  return (
+    <div className={`p-3 rounded-lg border ${color}`}>
+      <div className="flex items-center gap-2 mb-1">
+        <span className={`w-2 h-2 rounded-full ${dot}`} />
+        <span className="text-[11px] font-medium">{label}</span>
+      </div>
+      <div className="text-lg font-semibold mt-1 tabular-nums">{formatNumber(count)}</div>
+      <div className="text-[10px] muted mt-0.5">{formatPercentage(pct)} du total</div>
+    </div>
+  );
+}
+
+function SourceBadges({ sources }: { sources: Array<"paid" | "outbound"> }) {
+  if (sources.length === 2) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30">
+        Multi-canal
+      </span>
+    );
+  }
+  if (sources[0] === "paid") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+        LinkedIn Ads
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+      Outbound
+    </span>
   );
 }

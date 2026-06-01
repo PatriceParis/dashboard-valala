@@ -38,6 +38,12 @@ interface CampaignAnalyticsFile {
 interface OutboundFile {
   campaigns: Array<{ id: string; name: string }>;
   dailyActivity: unknown[];
+  companies?: Array<{
+    domain: string;
+    companyName?: string;
+    leadCount: number;
+    lastActivityDate: string;
+  }>;
 }
 interface ABXCompanyMatch {
   id: string;
@@ -311,9 +317,20 @@ async function main() {
   );
   console.log(`Total paid spend (90j, CAMPAIGN-level): ${totalPaidSpend90j.toFixed(2)}€`);
 
+  // -----------------------------------------------------------
+  // Outbound (lemlist) — build domain set captured from activities
+  // -----------------------------------------------------------
+  const outboundCompanies = outbound.companies ?? [];
+  console.log(`Outbound companies (domains): ${outboundCompanies.length}`);
+  const outboundByDomain = new Map(outboundCompanies.map((c) => [c.domain, c]));
+  // Track which outbound domains end up matched into the union below.
+  const matchedOutboundDomains = new Set<string>();
+
   const matches: ABXCompanyMatch[] = [];
   // Skip companies whose "name" is just a numeric ID (orgLookup failed for them).
   const isNumericName = (s: string) => /^\d+$/.test(s.trim());
+
+  // ---- Iterate paid first (LinkedIn MEMBER_COMPANY pivot) ----
   for (const p of paid) {
     let hs: HSCompany | undefined;
     let kind: "domain" | "slug" | "fuzzy" = "fuzzy";
@@ -359,12 +376,20 @@ async function main() {
       }
     }
 
+    // Determine if this paid company is also touched by outbound (via domain).
+    const hsDomain = normalizeDomain(hs?.properties.domain);
+    const sources: Array<"paid" | "outbound"> = ["paid"];
+    if (hsDomain && outboundByDomain.has(hsDomain)) {
+      sources.push("outbound");
+      matchedOutboundDomains.add(hsDomain);
+    }
+
     const m: ABXCompanyMatch = {
       id: hs?.id ?? `linkedin:${p.orgId}`,
       name: hs?.properties.name ?? p.name,
-      domain: normalizeDomain(hs?.properties.domain),
+      domain: hsDomain,
       linkedinSlug: slug,
-      sources: ["paid"],
+      sources,
       confidence,
       matchKind: kind,
       reached: true,
@@ -388,6 +413,82 @@ async function main() {
     }
     matches.push(m);
   }
+
+  // ---- Iterate outbound-only (lemlist domains not touched by paid) ----
+  // For each remaining outbound domain, try to match to HubSpot by domain or
+  // company name. Create a match entry with sources=["outbound"].
+  for (const oc of outboundCompanies) {
+    if (matchedOutboundDomains.has(oc.domain)) continue;
+    let hs: HSCompany | undefined = hsByDomain.get(oc.domain);
+    let kind: "domain" | "slug" | "fuzzy" = "domain";
+    let confidence = hs ? 1.0 : 0;
+
+    if (!hs && oc.companyName) {
+      // Try normalized name match
+      const norm = normalizeName(oc.companyName);
+      if (norm.length >= 3) {
+        const direct = hsByNormName.get(norm);
+        if (direct) {
+          hs = direct;
+          kind = "fuzzy";
+          confidence = 1.0;
+        }
+      }
+      // Fuzzy fallback
+      if (!hs) {
+        let bestScore = 0;
+        let best: HSCompany | undefined;
+        for (const c of companies) {
+          const s = fuzzyScore(oc.companyName, c.properties.name ?? "");
+          if (s > bestScore) {
+            bestScore = s;
+            best = c;
+          }
+        }
+        if (best && bestScore >= 0.6) {
+          hs = best;
+          kind = "fuzzy";
+          confidence = bestScore;
+        }
+      }
+    }
+
+    const m: ABXCompanyMatch = {
+      id: hs?.id ?? `outbound:${oc.domain}`,
+      name: hs?.properties.name ?? oc.companyName ?? oc.domain,
+      domain: oc.domain,
+      sources: ["outbound"],
+      confidence,
+      matchKind: kind,
+      reached: true,
+      inCRM: !!hs,
+      quoted: false,
+      won: false,
+      firstCRMDate: hs?.properties.createdate
+        ? new Date(parseInt(hs.properties.createdate, 10) || 0).toISOString().slice(0, 10)
+        : undefined,
+    };
+
+    if (hs) {
+      const ds = dealsByCompany.get(hs.id) ?? [];
+      const pipelineEUR = ds.reduce((sum, d) => sum + (parseFloat(d.properties.amount ?? "0") || 0), 0);
+      const wonDeals = ds.filter((d) => d.properties.hs_is_closed_won === "true");
+      const revenueEUR = wonDeals.reduce((sum, d) => sum + (parseFloat(d.properties.amount ?? "0") || 0), 0);
+      m.quoted = ds.length > 0;
+      m.won = wonDeals.length > 0;
+      m.pipelineEUR = pipelineEUR;
+      m.revenueEUR = revenueEUR;
+    }
+    matches.push(m);
+  }
+
+  // Counts for logs
+  const paidOnlyCount = matches.filter((m) => m.sources.length === 1 && m.sources[0] === "paid").length;
+  const outboundOnlyCount = matches.filter((m) => m.sources.length === 1 && m.sources[0] === "outbound").length;
+  const bothCount = matches.filter((m) => m.sources.length === 2).length;
+  console.log(
+    `  Sources: paid-only=${paidOnlyCount}, outbound-only=${outboundOnlyCount}, both=${bothCount}`,
+  );
 
   const funnel: ABXFunnel = {
     reached: matches.filter((m) => m.reached).length,

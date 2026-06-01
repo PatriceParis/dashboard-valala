@@ -44,11 +44,29 @@ interface LemlistCampaign {
   dealCount: number;
 }
 
+interface OutboundCompany {
+  domain: string;
+  companyName?: string;
+  leadCount: number;
+  lastActivityDate: string;
+}
+
 interface OutboundData {
   campaigns: LemlistCampaign[];
   dailyActivity: OutboundDailyActivity[];
+  companies?: OutboundCompany[];
   lastUpdated: string;
 }
+
+// Personal / generic email domains to exclude from outbound company aggregation.
+const PERSONAL_DOMAINS = new Set<string>([
+  "gmail.com", "googlemail.com", "yahoo.com", "yahoo.fr", "hotmail.com",
+  "hotmail.fr", "outlook.com", "outlook.fr", "live.com", "live.fr",
+  "icloud.com", "me.com", "mac.com", "free.fr", "orange.fr", "sfr.fr",
+  "wanadoo.fr", "laposte.net", "neuf.fr", "bbox.fr", "aol.com", "proton.me",
+  "protonmail.com", "pm.me", "gmx.com", "gmx.fr", "yandex.com", "yandex.ru",
+  "mail.com", "fastmail.com", "tutanota.com", "zoho.com", "msn.com",
+]);
 
 function writeJson(filename: string, payload: unknown) {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -191,9 +209,14 @@ async function main() {
   // -----------------------------------------------------------
   // Step 3 — daily activity (90j)
   // -----------------------------------------------------------
-  console.log("[3/3] daily activity");
+  console.log("[3/3] daily activity + lead domains");
   const daily = new Map<string, OutboundDailyActivity>();
-  // Single global pull (no per-campaign loop to limit API cost)
+  // Outbound companies aggregated by domain (derived from leadEmail in activities).
+  // Used downstream by fetch-abx-data.ts for matching outbound ↔ HubSpot CRM.
+  const outboundCompaniesByDomain = new Map<
+    string,
+    { domain: string; companyName?: string; leadEmails: Set<string>; lastActivityDate: string }
+  >();
   let after: string | undefined;
   let totalActivities = 0;
   try {
@@ -204,28 +227,71 @@ async function main() {
         limit: 100,
         after,
       })) as
-        | Array<{ type?: string; date?: string; createdAt?: string; _id?: string }>
-        | { activities?: Array<{ type?: string; date?: string; createdAt?: string; _id?: string }>; nextCursor?: string };
+        | Array<{
+            type?: string;
+            date?: string;
+            createdAt?: string;
+            _id?: string;
+            leadEmail?: string;
+            leadId?: string;
+            companyName?: string;
+          }>
+        | {
+            activities?: Array<{
+              type?: string;
+              date?: string;
+              createdAt?: string;
+              _id?: string;
+              leadEmail?: string;
+              leadId?: string;
+              companyName?: string;
+            }>;
+            nextCursor?: string;
+          };
 
       const items = Array.isArray(res) ? res : (res.activities ?? []);
       if (items.length === 0) break;
       for (const a of items) {
         const iso = (a.date ?? a.createdAt ?? "").slice(0, 10);
         if (!iso) continue;
+        // Daily bucket rollup
         const bucket = bucketize(a.type);
-        if (!bucket) continue;
-        const cur: OutboundDailyActivity =
-          daily.get(iso) ?? {
-            date: iso,
-            emailsSent: 0,
-            emailsOpened: 0,
-            emailsReplied: 0,
-            linkedinSent: 0,
-            linkedinAccepted: 0,
-          };
-        cur[bucket] += 1;
-        daily.set(iso, cur);
-        totalActivities++;
+        if (bucket) {
+          const cur: OutboundDailyActivity =
+            daily.get(iso) ?? {
+              date: iso,
+              emailsSent: 0,
+              emailsOpened: 0,
+              emailsReplied: 0,
+              linkedinSent: 0,
+              linkedinAccepted: 0,
+            };
+          cur[bucket] += 1;
+          daily.set(iso, cur);
+          totalActivities++;
+        }
+        // Extract company domain from leadEmail (post-@ part).
+        // Filter generic / personal domains so we keep only B2B companies.
+        const email = (a.leadEmail || "").toLowerCase().trim();
+        const at = email.indexOf("@");
+        if (at > 0) {
+          const domain = email.slice(at + 1);
+          if (domain && !PERSONAL_DOMAINS.has(domain)) {
+            const existing = outboundCompaniesByDomain.get(domain);
+            if (existing) {
+              existing.leadEmails.add(email);
+              if (iso > existing.lastActivityDate) existing.lastActivityDate = iso;
+              if (a.companyName && !existing.companyName) existing.companyName = a.companyName;
+            } else {
+              outboundCompaniesByDomain.set(domain, {
+                domain,
+                companyName: a.companyName,
+                leadEmails: new Set([email]),
+                lastActivityDate: iso,
+              });
+            }
+          }
+        }
       }
       const next = Array.isArray(res) ? items[items.length - 1]?._id : res.nextCursor;
       if (!next || next === after) break;
@@ -239,12 +305,23 @@ async function main() {
     a.date.localeCompare(b.date),
   );
 
+  // Serialize outbound companies (replace Set with count)
+  const outboundCompanies = Array.from(outboundCompaniesByDomain.values()).map((c) => ({
+    domain: c.domain,
+    companyName: c.companyName,
+    leadCount: c.leadEmails.size,
+    lastActivityDate: c.lastActivityDate,
+  }));
+
   writeJson("outbound.json", {
     campaigns,
     dailyActivity,
+    companies: outboundCompanies,
     lastUpdated: new Date().toISOString(),
-  } satisfies OutboundData);
-  console.log(`  ${campaigns.length} campaigns, ${dailyActivity.length} days, ${totalActivities} activities`);
+  } as OutboundData);
+  console.log(
+    `  ${campaigns.length} campaigns, ${dailyActivity.length} days, ${totalActivities} activities, ${outboundCompanies.length} outbound companies (domains)`,
+  );
   console.log("=== done ===");
 }
 
