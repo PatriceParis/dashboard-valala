@@ -197,7 +197,7 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
         <KpiCard
           label="ROAS"
           value={dynamicSpend > 0 ? `${roas.toFixed(2)}×` : "—"}
-          sub={`Dépenses Ads : ${formatCurrency(dynamicSpend, currency)} (période sélectionnée)`}
+          sub={`Dépenses ABX : ${formatCurrency(dynamicSpend, currency)} sur la période sélectionnée`}
           accent="orange"
         />
       </div>

@@ -43,3 +43,8 @@ export const LINKEDIN_REST_HEADER = "2.0.0";
 
 // TODO V2: lemlist constants (campaign types, MQL/SQL field patterns)
 // TODO V3: HubSpot constants (pipeline stages, deal property mappings)
+
+// Campaign group ID utilisé pour scoper l'onglet Impact CRM (LinkedIn ABX only).
+// Cf. weekly Valala 04/06/2026 : Impact CRM doit mesurer la VX uniquement, pas
+// le fil rouge. Si vide, le scope retombe sur l'ensemble des campagnes.
+export const ABX_CAMPAIGN_GROUP_ID = "1003302024";

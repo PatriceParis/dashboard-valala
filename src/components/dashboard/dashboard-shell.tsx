@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { CLIENT_SUBTITLE, CLIENT_TITLE, KPI_CONFIG, DEFAULT_LOOKBACK_DAYS } from "@/lib/constants";
+import { ABX_CAMPAIGN_GROUP_ID, CLIENT_SUBTITLE, CLIENT_TITLE, KPI_CONFIG, DEFAULT_LOOKBACK_DAYS } from "@/lib/constants";
 import type {
   Campaign,
   ComputedKPIsWithDelta,
@@ -173,6 +173,21 @@ export function DashboardShell({ data }: DashboardShellProps) {
     [data.dailyAnalytics, campaignIdSet],
   );
 
+  // ABX-scoped dailyAnalytics : indépendant du filtre groupe sélectionné par
+  // l'utilisateur. L'onglet Impact CRM mesure TOUJOURS uniquement le groupe
+  // ABX (cf. weekly Valala 04/06/2026), peu importe le filtre du header.
+  const abxCampaignIdSet = useMemo(() => {
+    return new Set(
+      data.campaigns
+        .filter((c) => c.campaignGroupId === ABX_CAMPAIGN_GROUP_ID)
+        .map((c) => c.id),
+    );
+  }, [data.campaigns]);
+  const abxDailyAnalytics = useMemo(
+    () => data.dailyAnalytics.filter((d) => abxCampaignIdSet.has(d.campaignId)),
+    [data.dailyAnalytics, abxCampaignIdSet],
+  );
+
   return (
     <div className="min-h-screen px-6 py-6 max-w-[1400px] mx-auto">
       {/* Header */}
@@ -284,7 +299,7 @@ export function DashboardShell({ data }: DashboardShellProps) {
           <ABXSection
             data={data.abx}
             currency={data.currency}
-            dailyAnalytics={dailyForChart}
+            dailyAnalytics={abxDailyAnalytics}
             start={range.start}
             end={range.end}
           />
