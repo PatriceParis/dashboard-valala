@@ -16,6 +16,7 @@ interface Props {
 
 type SortKey = "name" | "confidence" | "pipelineEUR" | "revenueEUR";
 type SourceFilter = "all" | "paid" | "outbound" | "both";
+type PhaseFilter = "all" | "quoted" | "won" | "lost" | "noDeal";
 
 /**
  * Impact CRM — matching cross-source (LinkedIn Ads + lemlist outbound) ↔ HubSpot.
@@ -27,6 +28,7 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
   const [sortKey, setSortKey] = useState<SortKey>("revenueEUR");
   const [sortAsc, setSortAsc] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all");
 
   // Spend dynamique aligné sur la période sélectionnée (même calcul que KPI Dépenses).
   const dynamicSpend = useMemo(() => {
@@ -66,16 +68,25 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
     return { paid, outbound, both, total: matches.length };
   }, [matches]);
 
-  // Filtered rows (sort + source filter)
+  // Filtered rows (sort + source filter + phase filter)
   const filteredMatches = useMemo(() => {
     return matches.filter((m) => {
-      if (sourceFilter === "all") return true;
-      if (sourceFilter === "both") return m.sources.length === 2;
-      if (sourceFilter === "paid") return m.sources.length === 1 && m.sources[0] === "paid";
-      if (sourceFilter === "outbound") return m.sources.length === 1 && m.sources[0] === "outbound";
+      // Source filter
+      if (sourceFilter !== "all") {
+        if (sourceFilter === "both" && m.sources.length !== 2) return false;
+        if (sourceFilter === "paid" && !(m.sources.length === 1 && m.sources[0] === "paid")) return false;
+        if (sourceFilter === "outbound" && !(m.sources.length === 1 && m.sources[0] === "outbound")) return false;
+      }
+      // Phase filter
+      if (phaseFilter !== "all") {
+        if (phaseFilter === "quoted" && !m.quoted) return false;
+        if (phaseFilter === "won" && !m.won) return false;
+        if (phaseFilter === "lost" && !(m.dealsLost && m.dealsLost > 0)) return false;
+        if (phaseFilter === "noDeal" && (m.quoted || m.won || (m.dealsLost ?? 0) > 0)) return false;
+      }
       return true;
     });
-  }, [matches, sourceFilter]);
+  }, [matches, sourceFilter, phaseFilter]);
 
   const rows = useMemo(() => {
     return [...filteredMatches].sort((a, b) => {
@@ -120,11 +131,12 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
           <div>
             <h3 className="text-base font-semibold">Funnel d&apos;impact CRM</h3>
             <p className="text-[11px] muted mt-0.5">
-              Entreprises touchées via LinkedIn Ads + lemlist outbound, croisées avec votre CRM HubSpot.
+              Périmètre : campagnes du groupe <span className="text-blue-300/90">[Up&apos;Scale Ads] - ABX</span> sur LinkedIn + lemlist outbound, croisés avec HubSpot.
             </p>
           </div>
-          <div className="text-[11px] muted">
-            Snapshot 90 j · {formatNumber(funnel.reached)} entreprises analysées
+          <div className="text-[11px] muted text-right">
+            Snapshot 90 j · {formatNumber(funnel.reached)} entreprises<br />
+            <span className="text-[10px]">Devis = deals ouverts, Won = closed-won (somme des commandes)</span>
           </div>
         </div>
 
@@ -148,8 +160,8 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
             rateLabel={`${formatPercentage(reachToCrm)} des touchées`}
           />
           <FunnelBar
-            label="Avec devis"
-            sublabel="Au moins un deal HubSpot ouvert"
+            label="Devis ouvert"
+            sublabel="Au moins un deal actif (non clôturé)"
             count={funnel.quoted}
             rate={crmToQuoted}
             width={funnel.quoted / maxFunnel}
@@ -158,7 +170,7 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
           />
           <FunnelBar
             label="Gagnées"
-            sublabel="Deal closed-won"
+            sublabel="Closed-won, somme de toutes les commandes"
             count={funnel.won}
             rate={quotedToWon}
             width={funnel.won / maxFunnel}
@@ -173,13 +185,13 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
         <KpiCard
           label="Pipeline ouvert"
           value={formatCurrency(funnel.pipelineEUR, currency)}
-          sub={`${formatNumber(funnel.quoted)} entreprises avec devis`}
+          sub={`Somme des deals actifs · ${formatNumber(funnel.quoted)} entreprise${funnel.quoted > 1 ? "s" : ""}`}
           accent="indigo"
         />
         <KpiCard
           label="Revenue gagné"
           value={formatCurrency(funnel.revenueEUR, currency)}
-          sub={`${formatNumber(funnel.won)} deals closed-won`}
+          sub={`Somme de toutes les commandes closed-won · ${formatNumber(funnel.won)} entreprise${funnel.won > 1 ? "s" : ""}`}
           accent="emerald"
         />
         <KpiCard
@@ -227,29 +239,55 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
           <h3 className="text-sm font-semibold">
             Entreprises matchées <span className="muted font-normal text-xs">({rows.length} / {sourceCounts.total})</span>
           </h3>
-          {/* Source filter */}
-          <div className="flex items-center gap-1 text-[11px]">
-            <span className="muted mr-1">Filtre :</span>
-            {(
-              [
-                { id: "all", label: "Toutes" },
-                { id: "paid", label: "LinkedIn Ads" },
-                { id: "outbound", label: "Outbound" },
-                { id: "both", label: "Multi-canal" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setSourceFilter(opt.id)}
-                className={`px-3 py-1 rounded ${
-                  sourceFilter === opt.id
-                    ? "bg-white/10 text-white"
-                    : "bg-transparent muted hover:bg-white/5 hover:text-white"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          {/* Filters */}
+          <div className="flex items-center gap-3 text-[11px] flex-wrap justify-end">
+            <div className="flex items-center gap-1">
+              <span className="muted mr-1">Canal :</span>
+              {(
+                [
+                  { id: "all", label: "Tous" },
+                  { id: "paid", label: "LinkedIn Ads" },
+                  { id: "outbound", label: "Outbound" },
+                  { id: "both", label: "Multi-canal" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => setSourceFilter(opt.id)}
+                  className={`px-2.5 py-1 rounded ${
+                    sourceFilter === opt.id
+                      ? "bg-white/10 text-white"
+                      : "bg-transparent muted hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="muted mr-1">Phase :</span>
+              {(
+                [
+                  { id: "all", label: "Toutes" },
+                  { id: "quoted", label: "Devis ouvert" },
+                  { id: "won", label: "Gagnées" },
+                  { id: "lost", label: "Perdues" },
+                  { id: "noDeal", label: "Sans deal" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => setPhaseFilter(opt.id)}
+                  className={`px-2.5 py-1 rounded ${
+                    phaseFilter === opt.id
+                      ? "bg-white/10 text-white"
+                      : "bg-transparent muted hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -260,10 +298,9 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
                 <th className="px-3 py-2 text-left">Canal</th>
                 <th className="px-3 py-2 text-left">Match CRM</th>
                 {header("confidence", "Confiance")}
-                <th className="px-3 py-2 text-center">Devis</th>
-                <th className="px-3 py-2 text-center">Won</th>
-                {header("pipelineEUR", "Pipeline")}
-                {header("revenueEUR", "Revenue")}
+                <th className="px-3 py-2 text-center">Deals (O / G / P)</th>
+                {header("pipelineEUR", "Pipeline ouvert")}
+                {header("revenueEUR", "Revenue gagné")}
               </tr>
             </thead>
             <tbody>
@@ -286,12 +323,13 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
                   <td className="px-3 py-2 text-right text-xs">
                     {r.confidence > 0 ? formatPercentage(r.confidence) : "—"}
                   </td>
-                  <td className="px-3 py-2 text-center">{r.quoted ? "✓" : ""}</td>
-                  <td className="px-3 py-2 text-center">{r.won ? "✓" : ""}</td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-center text-xs tabular-nums">
+                    <DealCounts open={r.dealsOpen ?? 0} won={r.dealsWon ?? 0} lost={r.dealsLost ?? 0} />
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
                     {r.pipelineEUR ? formatCurrency(r.pipelineEUR, currency) : "—"}
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-right tabular-nums">
                     {r.revenueEUR ? formatCurrency(r.revenueEUR, currency) : "—"}
                   </td>
                 </tr>
@@ -404,6 +442,25 @@ function SourceCard({
       <div className="text-lg font-semibold mt-1 tabular-nums">{formatNumber(count)}</div>
       <div className="text-[10px] muted mt-0.5">{formatPercentage(pct)} du total</div>
     </div>
+  );
+}
+
+function DealCounts({ open, won, lost }: { open: number; won: number; lost: number }) {
+  if (open === 0 && won === 0 && lost === 0) return <span className="muted">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span title="Deals ouverts" className={open > 0 ? "text-purple-300" : "muted"}>
+        {open}
+      </span>
+      <span className="muted text-[10px]">/</span>
+      <span title="Deals gagnés" className={won > 0 ? "text-emerald-300" : "muted"}>
+        {won}
+      </span>
+      <span className="muted text-[10px]">/</span>
+      <span title="Deals perdus" className={lost > 0 ? "text-red-300/80" : "muted"}>
+        {lost}
+      </span>
+    </span>
   );
 }
 

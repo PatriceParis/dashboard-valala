@@ -480,6 +480,94 @@ async function main() {
   console.log(`  ${allOrgIds.size} distinct orgs`);
 
   // -----------------------------------------------------------
+  // Step 7b — ABX-scoped company analytics (groupe [Up'Scale Ads] - ABX)
+  // -----------------------------------------------------------
+  // Sépare l'attribution Impact CRM : seules les entreprises touchées par
+  // les campagnes du groupe ABX comptent dans le funnel CRM.
+  // Le fichier complet `company-analytics.json` reste utilisé par l'onglet
+  // Entreprises (vue large, tous groupes confondus).
+  //
+  // Référence weekly Valala 04/06/2026 : « mesure impact CRM uniquement sur
+  // la campagne LinkedIn ABX + lemlist qu'on garde ».
+  const ABX_GROUP_ID = "1003302024";
+  const abxCampaigns = campaigns.filter((c) => c.campaignGroupId === ABX_GROUP_ID);
+  console.log(`[8b/8] ABX-scoped company analytics (${abxCampaigns.length} campaigns in group ${ABX_GROUP_ID})`);
+  if (abxCampaigns.length === 0) {
+    writeJson("company-analytics-abx.json", []);
+    console.log(`  ABX group has no campaigns; wrote empty file`);
+  } else {
+    const abxCampaignUrns = abxCampaigns.map((c) => `urn:li:sponsoredCampaign:${c.id}`);
+    const abxBatches = chunk(abxCampaignUrns, 20);
+    const abxCompanyWindows: typeof companyWindows = [];
+    const abxRawByWindow: Record<string, Map<string, { impressions: number; clicks: number; spend: number }>> = {
+      "7d": new Map(),
+      "30d": new Map(),
+      "90d": new Map(),
+    };
+    const abxOrgIds = new Set<string>();
+    for (const w of ["7d", "30d", "90d"] as const) {
+      const days = w === "7d" ? 7 : w === "30d" ? 30 : 90;
+      const wStart = addDays(endDate, -(days - 1));
+      const wStartParts = toLinkedInDateParts(wStart);
+      for (const [i, batch] of abxBatches.entries()) {
+        try {
+          const res = (await client.getCompanyAnalytics(batch, wStartParts, endParts)) as {
+            elements?: Array<RawElement>;
+          };
+          for (const el of res.elements ?? []) {
+            const orgUrn = el.pivotValues?.[0];
+            if (!orgUrn) continue;
+            const orgId = orgUrn.split(":").pop() ?? "";
+            if (!orgId) continue;
+            abxOrgIds.add(orgId);
+            const cur = abxRawByWindow[w].get(orgId) ?? { impressions: 0, clicks: 0, spend: 0 };
+            cur.impressions += num(el.impressions);
+            cur.clicks += num(el.clicks);
+            cur.spend += num(el.costInLocalCurrency);
+            abxRawByWindow[w].set(orgId, cur);
+          }
+        } catch (err) {
+          console.warn(`  ABX company analytics ${w} batch ${i + 1} failed:`, (err as Error).message);
+        }
+      }
+    }
+    // Réutilise les org names déjà résolus (orgNames est local au scope mais on
+    // refait un lookup partiel pour les nouveaux orgIds ABX qui ne seraient
+    // pas dans la table globale, ce qui ne devrait pas arriver puisque les
+    // campagnes ABX sont un sous-ensemble des campagnes globales).
+    const abxOnlyIds = Array.from(abxOrgIds).filter((id) => !orgNames.has(id));
+    if (abxOnlyIds.length > 0) {
+      for (const batch of chunk(abxOnlyIds, 50)) {
+        try {
+          const lookup = (await client.organizationLookup(batch)) as {
+            results?: Record<string, { localizedName?: string; vanityName?: string }>;
+          };
+          for (const [key, info] of Object.entries(lookup.results ?? {})) {
+            const id = key.includes(":") ? (key.split(":").pop() ?? "") : key;
+            if (id) orgNames.set(id, { name: info.localizedName ?? id, vanityName: info.vanityName });
+          }
+        } catch (err) {
+          console.warn(`  ABX organizationLookup batch failed:`, (err as Error).message);
+        }
+      }
+    }
+    for (const w of ["7d", "30d", "90d"] as const) {
+      const entries = Array.from(abxRawByWindow[w].entries()).map(([orgId, agg]) => ({
+        orgId,
+        name: orgNames.get(orgId)?.name ?? orgId,
+        vanityName: orgNames.get(orgId)?.vanityName,
+        impressions: agg.impressions,
+        clicks: agg.clicks,
+        spend: agg.spend,
+      }));
+      entries.sort((a, b) => b.impressions - a.impressions);
+      abxCompanyWindows.push({ window: w, entries });
+    }
+    writeJson("company-analytics-abx.json", abxCompanyWindows);
+    console.log(`  ${abxOrgIds.size} distinct ABX-touched orgs`);
+  }
+
+  // -----------------------------------------------------------
   // Meta
   // -----------------------------------------------------------
   writeJson("meta.json", {

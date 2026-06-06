@@ -59,6 +59,9 @@ interface ABXCompanyMatch {
   won: boolean;
   pipelineEUR?: number;
   revenueEUR?: number;
+  dealsOpen?: number;
+  dealsWon?: number;
+  dealsLost?: number;
   firstCRMDate?: string;
 }
 interface ABXFunnel {
@@ -152,13 +155,20 @@ function normalizeName(s: string): string {
 async function main() {
   console.log("=== ABX matching (Valala) ===");
 
-  const companyWindows = readJson<CompanyAnalyticsFile[]>("company-analytics.json", []);
+  // V3.1 — Impact CRM scopé sur le groupe ABX (weekly Valala 04/06/2026).
+  // Si `company-analytics-abx.json` existe, on l'utilise comme source paid
+  // pour le matching ; sinon, fallback sur le fichier global (rétro-compat).
+  const abxCompanyWindows = readJson<CompanyAnalyticsFile[]>("company-analytics-abx.json", []);
+  const fallbackCompanyWindows = readJson<CompanyAnalyticsFile[]>("company-analytics.json", []);
+  const companyWindows = abxCompanyWindows.length > 0 ? abxCompanyWindows : fallbackCompanyWindows;
+  const usingABXScope = abxCompanyWindows.length > 0;
+  console.log(`Paid scope: ${usingABXScope ? "ABX group only" : "all groups (fallback)"}`);
   const outbound = readJson<OutboundFile>("outbound.json", { campaigns: [], dailyActivity: [] });
 
   // Use 90d window for ABX matching (broadest signal coverage)
   const paid =
     companyWindows.find((w) => w.window === "90d")?.entries ?? [];
-  console.log(`Paid companies (90d): ${paid.length}`);
+  console.log(`Paid companies (90d, ${usingABXScope ? "ABX-scoped" : "all"}): ${paid.length}`);
   console.log(`Outbound campaigns: ${outbound.campaigns.length}`);
 
   if (!process.env.HUBSPOT_ACCESS_TOKEN) {
@@ -403,13 +413,23 @@ async function main() {
 
     if (hs) {
       const ds = dealsByCompany.get(hs.id) ?? [];
-      const pipelineEUR = ds.reduce((sum, d) => sum + (parseFloat(d.properties.amount ?? "0") || 0), 0);
-      const wonDeals = ds.filter((d) => d.properties.hs_is_closed_won === "true");
-      const revenueEUR = wonDeals.reduce((sum, d) => sum + (parseFloat(d.properties.amount ?? "0") || 0), 0);
-      m.quoted = ds.length > 0;
+      const amount = (d: HSDeal) => parseFloat(d.properties.amount ?? "0") || 0;
+      const isClosed = (d: HSDeal) => d.properties.hs_is_closed === "true";
+      const isWon = (d: HSDeal) => d.properties.hs_is_closed_won === "true";
+      const isLost = (d: HSDeal) => isClosed(d) && !isWon(d);
+      const openDeals = ds.filter((d) => !isClosed(d));
+      const wonDeals = ds.filter(isWon);
+      const lostDeals = ds.filter(isLost);
+      // Pipeline = OPEN deals only (forecast). Revenue = WON deals (toutes les
+      // commandes gagnées, pas juste la première). Évite la confusion vue en
+      // weekly 04/06 sur Topivo (closed-lost montré comme « devis »).
+      m.quoted = openDeals.length > 0;
       m.won = wonDeals.length > 0;
-      m.pipelineEUR = pipelineEUR;
-      m.revenueEUR = revenueEUR;
+      m.pipelineEUR = openDeals.reduce((s, d) => s + amount(d), 0);
+      m.revenueEUR = wonDeals.reduce((s, d) => s + amount(d), 0);
+      m.dealsOpen = openDeals.length;
+      m.dealsWon = wonDeals.length;
+      m.dealsLost = lostDeals.length;
     }
     matches.push(m);
   }
@@ -471,13 +491,20 @@ async function main() {
 
     if (hs) {
       const ds = dealsByCompany.get(hs.id) ?? [];
-      const pipelineEUR = ds.reduce((sum, d) => sum + (parseFloat(d.properties.amount ?? "0") || 0), 0);
-      const wonDeals = ds.filter((d) => d.properties.hs_is_closed_won === "true");
-      const revenueEUR = wonDeals.reduce((sum, d) => sum + (parseFloat(d.properties.amount ?? "0") || 0), 0);
-      m.quoted = ds.length > 0;
+      const amount = (d: HSDeal) => parseFloat(d.properties.amount ?? "0") || 0;
+      const isClosed = (d: HSDeal) => d.properties.hs_is_closed === "true";
+      const isWon = (d: HSDeal) => d.properties.hs_is_closed_won === "true";
+      const isLost = (d: HSDeal) => isClosed(d) && !isWon(d);
+      const openDeals = ds.filter((d) => !isClosed(d));
+      const wonDeals = ds.filter(isWon);
+      const lostDeals = ds.filter(isLost);
+      m.quoted = openDeals.length > 0;
       m.won = wonDeals.length > 0;
-      m.pipelineEUR = pipelineEUR;
-      m.revenueEUR = revenueEUR;
+      m.pipelineEUR = openDeals.reduce((s, d) => s + amount(d), 0);
+      m.revenueEUR = wonDeals.reduce((s, d) => s + amount(d), 0);
+      m.dealsOpen = openDeals.length;
+      m.dealsWon = wonDeals.length;
+      m.dealsLost = lostDeals.length;
     }
     matches.push(m);
   }
@@ -521,8 +548,9 @@ async function main() {
     // domain / linkedinSlug : on garde la valeur non-vide la plus complète
     if (!existing.domain && m.domain) existing.domain = m.domain;
     if (!existing.linkedinSlug && m.linkedinSlug) existing.linkedinSlug = m.linkedinSlug;
-    // Le pipeline / revenue / quoted / won viennent du même deal HubSpot
-    // (identifié par HubSpot ID), donc identiques entre les 2 entrées : on conserve.
+    // Le pipeline / revenue / quoted / won / dealsOpen / dealsWon / dealsLost
+    // viennent du même deal HubSpot (identifié par HubSpot ID), donc identiques
+    // entre les 2 entrées : on conserve la valeur existante.
   }
   const merged = [...dedupedById.values(), ...standalone];
   const dedupedCount = beforeDedup - merged.length;

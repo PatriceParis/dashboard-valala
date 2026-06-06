@@ -193,14 +193,23 @@ export interface ABXCompanyMatch {
   /** match confidence: domain=1.0, slug=0.9, fuzzy=score */
   confidence: number;
   matchKind: "domain" | "slug" | "fuzzy";
-  /** funnel position */
+  /** funnel position
+   * `quoted` = a CURRENTLY OPEN deal exists (not closed). A company with only
+   * closed-lost deals is reached/inCRM but NOT quoted. */
   reached: boolean;
   inCRM: boolean;
   quoted: boolean;
   won: boolean;
-  /** amounts */
+  /** amounts
+   * `pipelineEUR` = sum of OPEN deals amount (forecast, all currently-open deals)
+   * `revenueEUR` = sum of CLOSED-WON deals amount (toutes les commandes gagnées,
+   *  pas juste la première). */
   pipelineEUR?: number;
   revenueEUR?: number;
+  /** deal breakdown (sum across all pipelines, all stages) */
+  dealsOpen?: number;
+  dealsWon?: number;
+  dealsLost?: number;
   /** first CRM entry date (used for paid-influenced filter) */
   firstCRMDate?: string;
 }
