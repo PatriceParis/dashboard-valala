@@ -63,6 +63,9 @@ interface ABXCompanyMatch {
   dealsWon?: number;
   dealsLost?: number;
   firstCRMDate?: string;
+  influenced?: boolean;
+  pipelineInfluencedEUR?: number;
+  revenueInfluencedEUR?: number;
 }
 interface ABXFunnel {
   reached: number;
@@ -72,7 +75,19 @@ interface ABXFunnel {
   pipelineEUR: number;
   revenueEUR: number;
   spendEUR: number;
+  inCRMInfluenced: number;
+  quotedInfluenced: number;
+  wonInfluenced: number;
+  pipelineInfluencedEUR: number;
+  revenueInfluencedEUR: number;
+  abxLaunchDate: string;
 }
+
+// Date de lancement des campagnes du groupe ABX (= borne d'attribution
+// d'influence). Une entreprise/deal antérieur à cette date est considéré
+// préexistant (déjà client/connu), donc EXCLU du ROAS influence.
+// ⚠️ À ajuster si la date de démarrage ABX du client change.
+const ABX_LAUNCH_DATE = "2026-04-01";
 interface ABXData {
   matches: ABXCompanyMatch[];
   funnel: ABXFunnel;
@@ -89,7 +104,11 @@ function writeEmpty(reason: string) {
   console.warn(`[abx] skipped: ${reason}`);
   writeJson("abx.json", {
     matches: [],
-    funnel: { reached: 0, inCRM: 0, quoted: 0, won: 0, pipelineEUR: 0, revenueEUR: 0, spendEUR: 0 },
+    funnel: {
+      reached: 0, inCRM: 0, quoted: 0, won: 0, pipelineEUR: 0, revenueEUR: 0, spendEUR: 0,
+      inCRMInfluenced: 0, quotedInfluenced: 0, wonInfluenced: 0,
+      pipelineInfluencedEUR: 0, revenueInfluencedEUR: 0, abxLaunchDate: ABX_LAUNCH_DATE,
+    },
     lastUpdated: new Date().toISOString(),
   } satisfies ABXData);
 }
@@ -315,17 +334,31 @@ async function main() {
   }
   console.log(`  ${dealsByCompany.size} companies with deals`);
 
-  // Total paid spend over the same 90j window as ABX matching, computed from
-  // CAMPAIGN-level analytics (not MEMBER_COMPANY pivot) so it matches the
-  // « Dépenses » KPI of the Performance tab over a 90j range.
-  // The MEMBER_COMPANY pivot only attributes ~30% of total spend (uniquement
-  // les impressions où le profil viewer est associé à une LinkedIn company page).
+  // Dépenses ABX (90j, niveau CAMPAIGN) — scopées aux campagnes du groupe ABX
+  // uniquement (cohérent avec le périmètre Impact CRM). On lit campaigns.json
+  // pour la correspondance campaignId → campaignGroupId, puis on somme
+  // analytics.json (CAMPAIGN ALL) sur les seules campagnes ABX.
+  // Le MEMBER_COMPANY pivot n'attribue que ~30% du spend → on n'utilise PAS ce
+  // pivot pour le dénominateur du ROAS.
+  const ABX_GROUP_ID = "1003302024";
   const campaignAnalytics = readJson<CampaignAnalyticsFile[]>("analytics.json", []);
-  const totalPaidSpend90j = campaignAnalytics.reduce(
-    (s, c) => s + (c.costInLocalCurrency || 0),
-    0,
+  const campaignsMeta = readJson<Array<{ id: string; campaignGroupId: string }>>(
+    "campaigns.json",
+    [],
   );
-  console.log(`Total paid spend (90j, CAMPAIGN-level): ${totalPaidSpend90j.toFixed(2)}€`);
+  const abxCampaignIds = new Set(
+    campaignsMeta.filter((c) => c.campaignGroupId === ABX_GROUP_ID).map((c) => c.id),
+  );
+  const totalSpendAll = campaignAnalytics.reduce((s, c) => s + (c.costInLocalCurrency || 0), 0);
+  const abxSpend90j =
+    abxCampaignIds.size > 0
+      ? campaignAnalytics
+          .filter((c) => abxCampaignIds.has(c.campaignId))
+          .reduce((s, c) => s + (c.costInLocalCurrency || 0), 0)
+      : totalSpendAll; // fallback si le mapping groupe est indisponible
+  console.log(
+    `ABX spend (90j, CAMPAIGN-level, ${abxCampaignIds.size} campagnes ABX): ${abxSpend90j.toFixed(2)}€ (total compte: ${totalSpendAll.toFixed(2)}€)`,
+  );
 
   // -----------------------------------------------------------
   // Outbound (lemlist) — build domain set captured from activities
@@ -339,6 +372,47 @@ async function main() {
   const matches: ABXCompanyMatch[] = [];
   // Skip companies whose "name" is just a numeric ID (orgLookup failed for them).
   const isNumericName = (s: string) => /^\d+$/.test(s.trim());
+
+  // Helper unique de calcul des métriques deal (évite la duplication entre les
+  // boucles paid et outbound). Distingue open / won / lost ET la sous-partie
+  // « influence » = deals CRÉÉS après le lancement ABX (date createdate).
+  const dealDateISO = (d: HSDeal): string => {
+    const c = d.properties.createdate;
+    if (!c) return "";
+    const t = parseInt(c, 10);
+    if (!Number.isFinite(t)) return "";
+    return new Date(t).toISOString().slice(0, 10);
+  };
+  const computeDealMetrics = (ds: HSDeal[]) => {
+    const amount = (d: HSDeal) => parseFloat(d.properties.amount ?? "0") || 0;
+    const isClosed = (d: HSDeal) => d.properties.hs_is_closed === "true";
+    const isWon = (d: HSDeal) => d.properties.hs_is_closed_won === "true";
+    const isInfluenced = (d: HSDeal) => {
+      const dt = dealDateISO(d);
+      return dt !== "" && dt >= ABX_LAUNCH_DATE;
+    };
+    const openDeals = ds.filter((d) => !isClosed(d));
+    const wonDeals = ds.filter(isWon);
+    const lostDeals = ds.filter((d) => isClosed(d) && !isWon(d));
+    return {
+      quoted: openDeals.length > 0,
+      won: wonDeals.length > 0,
+      pipelineEUR: openDeals.reduce((s, d) => s + amount(d), 0),
+      revenueEUR: wonDeals.reduce((s, d) => s + amount(d), 0),
+      dealsOpen: openDeals.length,
+      dealsWon: wonDeals.length,
+      dealsLost: lostDeals.length,
+      pipelineInfluencedEUR: openDeals.filter(isInfluenced).reduce((s, d) => s + amount(d), 0),
+      revenueInfluencedEUR: wonDeals.filter(isInfluenced).reduce((s, d) => s + amount(d), 0),
+    };
+  };
+  // Flag d'influence niveau entreprise : entrée en CRM après le lancement ABX,
+  // OU au moins un deal influencé (créé post-lancement).
+  const computeInfluenced = (m: ABXCompanyMatch): boolean => {
+    const fc = m.firstCRMDate;
+    if (fc && fc >= ABX_LAUNCH_DATE) return true;
+    return (m.pipelineInfluencedEUR ?? 0) > 0 || (m.revenueInfluencedEUR ?? 0) > 0;
+  };
 
   // ---- Iterate paid first (LinkedIn MEMBER_COMPANY pivot) ----
   for (const p of paid) {
@@ -412,25 +486,18 @@ async function main() {
     };
 
     if (hs) {
-      const ds = dealsByCompany.get(hs.id) ?? [];
-      const amount = (d: HSDeal) => parseFloat(d.properties.amount ?? "0") || 0;
-      const isClosed = (d: HSDeal) => d.properties.hs_is_closed === "true";
-      const isWon = (d: HSDeal) => d.properties.hs_is_closed_won === "true";
-      const isLost = (d: HSDeal) => isClosed(d) && !isWon(d);
-      const openDeals = ds.filter((d) => !isClosed(d));
-      const wonDeals = ds.filter(isWon);
-      const lostDeals = ds.filter(isLost);
-      // Pipeline = OPEN deals only (forecast). Revenue = WON deals (toutes les
-      // commandes gagnées, pas juste la première). Évite la confusion vue en
-      // weekly 04/06 sur Topivo (closed-lost montré comme « devis »).
-      m.quoted = openDeals.length > 0;
-      m.won = wonDeals.length > 0;
-      m.pipelineEUR = openDeals.reduce((s, d) => s + amount(d), 0);
-      m.revenueEUR = wonDeals.reduce((s, d) => s + amount(d), 0);
-      m.dealsOpen = openDeals.length;
-      m.dealsWon = wonDeals.length;
-      m.dealsLost = lostDeals.length;
+      const dm = computeDealMetrics(dealsByCompany.get(hs.id) ?? []);
+      m.quoted = dm.quoted;
+      m.won = dm.won;
+      m.pipelineEUR = dm.pipelineEUR;
+      m.revenueEUR = dm.revenueEUR;
+      m.dealsOpen = dm.dealsOpen;
+      m.dealsWon = dm.dealsWon;
+      m.dealsLost = dm.dealsLost;
+      m.pipelineInfluencedEUR = dm.pipelineInfluencedEUR;
+      m.revenueInfluencedEUR = dm.revenueInfluencedEUR;
     }
+    m.influenced = computeInfluenced(m);
     matches.push(m);
   }
 
@@ -490,22 +557,18 @@ async function main() {
     };
 
     if (hs) {
-      const ds = dealsByCompany.get(hs.id) ?? [];
-      const amount = (d: HSDeal) => parseFloat(d.properties.amount ?? "0") || 0;
-      const isClosed = (d: HSDeal) => d.properties.hs_is_closed === "true";
-      const isWon = (d: HSDeal) => d.properties.hs_is_closed_won === "true";
-      const isLost = (d: HSDeal) => isClosed(d) && !isWon(d);
-      const openDeals = ds.filter((d) => !isClosed(d));
-      const wonDeals = ds.filter(isWon);
-      const lostDeals = ds.filter(isLost);
-      m.quoted = openDeals.length > 0;
-      m.won = wonDeals.length > 0;
-      m.pipelineEUR = openDeals.reduce((s, d) => s + amount(d), 0);
-      m.revenueEUR = wonDeals.reduce((s, d) => s + amount(d), 0);
-      m.dealsOpen = openDeals.length;
-      m.dealsWon = wonDeals.length;
-      m.dealsLost = lostDeals.length;
+      const dm = computeDealMetrics(dealsByCompany.get(hs.id) ?? []);
+      m.quoted = dm.quoted;
+      m.won = dm.won;
+      m.pipelineEUR = dm.pipelineEUR;
+      m.revenueEUR = dm.revenueEUR;
+      m.dealsOpen = dm.dealsOpen;
+      m.dealsWon = dm.dealsWon;
+      m.dealsLost = dm.dealsLost;
+      m.pipelineInfluencedEUR = dm.pipelineInfluencedEUR;
+      m.revenueInfluencedEUR = dm.revenueInfluencedEUR;
     }
+    m.influenced = computeInfluenced(m);
     matches.push(m);
   }
 
@@ -571,9 +634,17 @@ async function main() {
     won: merged.filter((m) => m.won).length,
     pipelineEUR: merged.reduce((s, m) => s + (m.pipelineEUR ?? 0), 0),
     revenueEUR: merged.reduce((s, m) => s + (m.revenueEUR ?? 0), 0),
-    // Total paid spend 90j (CAMPAIGN-level) — cohérent avec le KPI « Dépenses »
-    // de l'onglet Performance si l'utilisateur sélectionne une période 90j.
-    spendEUR: totalPaidSpend90j,
+    // Dépenses ABX 90j (CAMPAIGN-level, groupe ABX uniquement). FIGÉ — le ROAS
+    // se calcule sur cette base, jamais sur la période sélectionnée (sinon
+    // revenue 90j / spend court = ROAS aberrant, cf. weekly 04/06 + skill #29).
+    spendEUR: abxSpend90j,
+    // Sous-funnel influence : entrées CRM / deals créés APRÈS le lancement ABX.
+    inCRMInfluenced: merged.filter((m) => m.inCRM && m.influenced).length,
+    quotedInfluenced: merged.filter((m) => (m.pipelineInfluencedEUR ?? 0) > 0).length,
+    wonInfluenced: merged.filter((m) => (m.revenueInfluencedEUR ?? 0) > 0).length,
+    pipelineInfluencedEUR: merged.reduce((s, m) => s + (m.pipelineInfluencedEUR ?? 0), 0),
+    revenueInfluencedEUR: merged.reduce((s, m) => s + (m.revenueInfluencedEUR ?? 0), 0),
+    abxLaunchDate: ABX_LAUNCH_DATE,
   };
 
   writeJson("abx.json", {
@@ -582,7 +653,10 @@ async function main() {
     lastUpdated: new Date().toISOString(),
   } satisfies ABXData);
   console.log(
-    `  ${merged.length} matches | reached=${funnel.reached} crm=${funnel.inCRM} quoted=${funnel.quoted} won=${funnel.won}`,
+    `  ${merged.length} matches | reached=${funnel.reached} crm=${funnel.inCRM} (influencées=${funnel.inCRMInfluenced}) quoted=${funnel.quoted} won=${funnel.won}`,
+  );
+  console.log(
+    `  Influence : pipeline=${funnel.pipelineInfluencedEUR.toFixed(0)}€ revenue=${funnel.revenueInfluencedEUR.toFixed(0)}€ | spend ABX 90j=${funnel.spendEUR.toFixed(0)}€ | ROAS=${funnel.spendEUR > 0 ? (funnel.revenueInfluencedEUR / funnel.spendEUR).toFixed(2) : "—"}×`,
   );
   console.log("=== done ===");
 }

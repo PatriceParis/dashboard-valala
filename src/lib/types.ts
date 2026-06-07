@@ -210,8 +210,15 @@ export interface ABXCompanyMatch {
   dealsOpen?: number;
   dealsWon?: number;
   dealsLost?: number;
-  /** first CRM entry date (used for paid-influenced filter) */
+  /** first CRM entry date (YYYY-MM-DD) */
   firstCRMDate?: string;
+  /** Attribution d'influence : true si l'entreprise est entrée en CRM (ou a un
+   * deal créé) APRÈS le démarrage des campagnes ABX. false = déjà cliente/connue
+   * avant l'ABX → exclue du ROAS pour ne pas s'attribuer du pipeline préexistant. */
+  influenced?: boolean;
+  /** Pipeline / revenue restreints aux deals créés post-lancement ABX. */
+  pipelineInfluencedEUR?: number;
+  revenueInfluencedEUR?: number;
 }
 
 export interface ABXFunnel {
@@ -221,8 +228,18 @@ export interface ABXFunnel {
   won: number;
   pipelineEUR: number;
   revenueEUR: number;
-  /** total spend that maps to influenced companies (paid only) */
+  /** Dépenses ABX (campagnes du groupe ABX uniquement, niveau CAMPAIGN, fenêtre 90j).
+   * FIGÉ sur 90j — ne PAS recalculer côté client sur la période sélectionnée
+   * (sinon ROAS = revenue 90j / spend court = artefact, cf. skill #29). */
   spendEUR: number;
+  // ---- Sous-funnel "influence" (entrées CRM / deals post-lancement ABX) ----
+  inCRMInfluenced: number;
+  quotedInfluenced: number;
+  wonInfluenced: number;
+  pipelineInfluencedEUR: number;
+  revenueInfluencedEUR: number;
+  /** Date de lancement ABX utilisée comme borne d'influence (YYYY-MM-DD). */
+  abxLaunchDate: string;
 }
 
 export interface ABXData {

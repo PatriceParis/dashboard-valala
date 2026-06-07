@@ -1,44 +1,33 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ABXData, DailyAnalytics } from "@/lib/types";
-import { formatCurrency, formatNumber, formatPercentage } from "@/lib/utils";
+import type { ABXData } from "@/lib/types";
+import { formatCurrency, formatDate, formatNumber, formatPercentage } from "@/lib/utils";
 
 interface Props {
   data?: ABXData;
   currency: string;
-  /** Daily analytics filtered to currently visible campaigns (same filters as KPI grid). */
-  dailyAnalytics: DailyAnalytics[];
-  /** Start/end of the period selected in the header (YYYY-MM-DD). */
-  start: string;
-  end: string;
 }
 
 type SortKey = "name" | "confidence" | "pipelineEUR" | "revenueEUR";
 type SourceFilter = "all" | "paid" | "outbound" | "both";
 type PhaseFilter = "all" | "quoted" | "won" | "lost" | "noDeal";
+type InfluenceFilter = "all" | "influenced" | "preexisting";
 
 /**
- * Impact CRM — matching cross-source (LinkedIn Ads + lemlist outbound) ↔ HubSpot.
+ * Impact CRM — matching cross-source (LinkedIn Ads ABX + lemlist outbound) ↔ HubSpot.
  *
- * Le funnel est figé sur 90j (snapshot ABX) ; le ROAS et les dépenses utilisent
- * la période sélectionnée dans l'en-tête (= même valeur que le KPI Dépenses).
+ * Funnel & financier figés sur le snapshot 90j. Le ROAS = revenue INFLUENCÉ
+ * (deals créés après le lancement ABX) / dépenses ABX 90j. Volontairement
+ * INDÉPENDANT du sélecteur de période du header : diviser un revenue cumulé par
+ * un spend de fenêtre courte donnerait un ROAS aberrant (cf. weekly 04/06).
  */
-export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props) {
+export function ABXSection({ data, currency }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("revenueEUR");
   const [sortAsc, setSortAsc] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all");
-
-  // Spend dynamique aligné sur la période sélectionnée (même calcul que KPI Dépenses).
-  const dynamicSpend = useMemo(() => {
-    let sum = 0;
-    for (const d of dailyAnalytics) {
-      if (d.date < start || d.date > end) continue;
-      sum += d.costInLocalCurrency;
-    }
-    return sum;
-  }, [dailyAnalytics, start, end]);
+  const [influenceFilter, setInfluenceFilter] = useState<InfluenceFilter>("all");
 
   if (!data || data.matches.length === 0) {
     return (
@@ -84,9 +73,12 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
         if (phaseFilter === "lost" && !(m.dealsLost && m.dealsLost > 0)) return false;
         if (phaseFilter === "noDeal" && (m.quoted || m.won || (m.dealsLost ?? 0) > 0)) return false;
       }
+      // Influence filter (post-ABX vs préexistant)
+      if (influenceFilter === "influenced" && !m.influenced) return false;
+      if (influenceFilter === "preexisting" && (m.influenced || !m.inCRM)) return false;
       return true;
     });
-  }, [matches, sourceFilter, phaseFilter]);
+  }, [matches, sourceFilter, phaseFilter, influenceFilter]);
 
   const rows = useMemo(() => {
     return [...filteredMatches].sort((a, b) => {
@@ -116,11 +108,17 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
     </th>
   );
 
-  // Conversions step by step
-  const reachToCrm = funnel.reached > 0 ? funnel.inCRM / funnel.reached : 0;
-  const crmToQuoted = funnel.inCRM > 0 ? funnel.quoted / funnel.inCRM : 0;
-  const quotedToWon = funnel.quoted > 0 ? funnel.won / funnel.quoted : 0;
-  const roas = dynamicSpend > 0 ? funnel.revenueEUR / dynamicSpend : 0;
+  // Conversions step by step — basées sur le sous-funnel INFLUENCE (post-ABX)
+  // pour la lecture principale. inCRM total reste affiché en contexte.
+  const reachToCrm = funnel.reached > 0 ? funnel.inCRMInfluenced / funnel.reached : 0;
+  const crmToQuoted =
+    funnel.inCRMInfluenced > 0 ? funnel.quotedInfluenced / funnel.inCRMInfluenced : 0;
+  const quotedToWon =
+    funnel.quotedInfluenced > 0 ? funnel.wonInfluenced / funnel.quotedInfluenced : 0;
+  // ROAS = revenue influencé / dépenses ABX 90j (toutes deux figées 90j).
+  const spendABX = funnel.spendEUR;
+  const roas = spendABX > 0 ? funnel.revenueInfluencedEUR / spendABX : 0;
+  const preexistingInCRM = funnel.inCRM - funnel.inCRMInfluenced;
   const maxFunnel = Math.max(funnel.reached, 1);
 
   return (
@@ -136,68 +134,78 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
           </div>
           <div className="text-[11px] muted text-right">
             Snapshot 90 j · {formatNumber(funnel.reached)} entreprises<br />
-            <span className="text-[10px]">Devis = deals ouverts, Won = closed-won (somme des commandes)</span>
+            <span className="text-[10px]">Influence = entrée CRM / deal créé après le {formatDate(funnel.abxLaunchDate)} (lancement ABX)</span>
           </div>
         </div>
 
-        {/* Visual funnel — 4 bars decreasing */}
+        {/* Visual funnel — 4 bars decreasing (lecture = influence post-ABX) */}
         <div className="space-y-2">
           <FunnelBar
             label="Touchées"
-            sublabel="LinkedIn Ads ou lemlist outbound"
+            sublabel="LinkedIn Ads ABX ou lemlist outbound"
             count={funnel.reached}
             rate={1}
             width={1}
             color="from-blue-500/40 to-blue-500/10"
           />
           <FunnelBar
-            label="Présentes en CRM"
-            sublabel="Match HubSpot (domaine / slug / nom)"
-            count={funnel.inCRM}
+            label="Entrées CRM post-ABX"
+            sublabel="Entrées en CRM après le lancement ABX (influence réelle)"
+            count={funnel.inCRMInfluenced}
             rate={reachToCrm}
-            width={funnel.inCRM / maxFunnel}
+            width={funnel.inCRMInfluenced / maxFunnel}
             color="from-indigo-500/40 to-indigo-500/10"
-            rateLabel={`${formatPercentage(reachToCrm)} des touchées`}
+            rateLabel={`${formatPercentage(reachToCrm)} des touchées${preexistingInCRM > 0 ? ` · + ${formatNumber(preexistingInCRM)} déjà clientes` : ""}`}
           />
           <FunnelBar
             label="Devis ouvert"
-            sublabel="Au moins un deal actif (non clôturé)"
-            count={funnel.quoted}
+            sublabel="Deal actif créé post-ABX"
+            count={funnel.quotedInfluenced}
             rate={crmToQuoted}
-            width={funnel.quoted / maxFunnel}
+            width={funnel.quotedInfluenced / maxFunnel}
             color="from-purple-500/40 to-purple-500/10"
-            rateLabel={`${formatPercentage(crmToQuoted)} du CRM`}
+            rateLabel={`${formatPercentage(crmToQuoted)} des entrées post-ABX`}
           />
           <FunnelBar
             label="Gagnées"
-            sublabel="Closed-won, somme de toutes les commandes"
-            count={funnel.won}
+            sublabel="Closed-won créé post-ABX (somme des commandes)"
+            count={funnel.wonInfluenced}
             rate={quotedToWon}
-            width={funnel.won / maxFunnel}
+            width={funnel.wonInfluenced / maxFunnel}
             color="from-emerald-500/40 to-emerald-500/10"
             rateLabel={`${formatPercentage(quotedToWon)} des devis`}
           />
         </div>
+        {preexistingInCRM > 0 && (
+          <p className="text-[10px] muted mt-3">
+            {formatNumber(preexistingInCRM)} entreprise{preexistingInCRM > 1 ? "s" : ""} touchée{preexistingInCRM > 1 ? "s" : ""} {preexistingInCRM > 1 ? "étaient" : "était"} déjà en CRM avant l&apos;ABX :
+            comptée{preexistingInCRM > 1 ? "s" : ""} comme touchée{preexistingInCRM > 1 ? "s" : ""} mais exclue{preexistingInCRM > 1 ? "s" : ""} du pipeline / revenue influencés et du ROAS.
+          </p>
+        )}
       </div>
 
-      {/* ===== Bloc 2 — KPIs financiers ===== */}
+      {/* ===== Bloc 2 — KPIs financiers (influence post-ABX) ===== */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCard
-          label="Pipeline ouvert"
-          value={formatCurrency(funnel.pipelineEUR, currency)}
-          sub={`Somme des deals actifs · ${formatNumber(funnel.quoted)} entreprise${funnel.quoted > 1 ? "s" : ""}`}
+          label="Pipeline influencé"
+          value={formatCurrency(funnel.pipelineInfluencedEUR, currency)}
+          sub={`Deals créés post-ABX · ${formatNumber(funnel.quotedInfluenced)} entreprise${funnel.quotedInfluenced > 1 ? "s" : ""}`}
           accent="indigo"
         />
         <KpiCard
-          label="Revenue gagné"
-          value={formatCurrency(funnel.revenueEUR, currency)}
-          sub={`Somme de toutes les commandes closed-won · ${formatNumber(funnel.won)} entreprise${funnel.won > 1 ? "s" : ""}`}
+          label="Revenue influencé"
+          value={formatCurrency(funnel.revenueInfluencedEUR, currency)}
+          sub={
+            funnel.wonInfluenced > 0
+              ? `Closed-won post-ABX · ${formatNumber(funnel.wonInfluenced)} entreprise${funnel.wonInfluenced > 1 ? "s" : ""}${funnel.wonInfluenced < 3 ? " (échantillon faible)" : ""}`
+              : "Aucun deal gagné post-ABX à date"
+          }
           accent="emerald"
         />
         <KpiCard
-          label="ROAS"
-          value={dynamicSpend > 0 ? `${roas.toFixed(2)}×` : "—"}
-          sub={`Dépenses ABX : ${formatCurrency(dynamicSpend, currency)} sur la période sélectionnée`}
+          label="ROAS (90j)"
+          value={spendABX > 0 && funnel.wonInfluenced > 0 ? `${roas.toFixed(2)}×` : "—"}
+          sub={`Revenue influencé / Dépenses ABX 90j : ${formatCurrency(spendABX, currency)}`}
           accent="orange"
         />
       </div>
@@ -288,6 +296,28 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
                 </button>
               ))}
             </div>
+            <div className="flex items-center gap-1">
+              <span className="muted mr-1">Influence :</span>
+              {(
+                [
+                  { id: "all", label: "Toutes" },
+                  { id: "influenced", label: "Post-ABX" },
+                  { id: "preexisting", label: "Déjà clientes" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => setInfluenceFilter(opt.id)}
+                  className={`px-2.5 py-1 rounded ${
+                    influenceFilter === opt.id
+                      ? "bg-white/10 text-white"
+                      : "bg-transparent muted hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -296,6 +326,7 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
               <tr>
                 {header("name", "Entreprise", "left")}
                 <th className="px-3 py-2 text-left">Canal</th>
+                <th className="px-3 py-2 text-left">Influence</th>
                 <th className="px-3 py-2 text-left">Match CRM</th>
                 {header("confidence", "Confiance")}
                 <th className="px-3 py-2 text-center">Deals (O / G / P)</th>
@@ -312,6 +343,9 @@ export function ABXSection({ data, currency, dailyAnalytics, start, end }: Props
                   </td>
                   <td className="px-3 py-2">
                     <SourceBadges sources={r.sources} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <InfluenceBadge influenced={r.influenced} inCRM={r.inCRM} />
                   </td>
                   <td className="px-3 py-2 text-xs">
                     {r.inCRM ? (
@@ -460,6 +494,22 @@ function DealCounts({ open, won, lost }: { open: number; won: number; lost: numb
       <span title="Deals perdus" className={lost > 0 ? "text-red-300/80" : "muted"}>
         {lost}
       </span>
+    </span>
+  );
+}
+
+function InfluenceBadge({ influenced, inCRM }: { influenced?: boolean; inCRM: boolean }) {
+  if (!inCRM) return <span className="muted text-[10px]">—</span>;
+  if (influenced) {
+    return (
+      <span className="inline-flex items-center text-[10px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+        Post-ABX
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center text-[10px] px-2 py-0.5 rounded bg-white/5 muted border border-white/10">
+      Déjà cliente
     </span>
   );
 }
