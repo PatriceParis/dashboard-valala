@@ -59,6 +59,10 @@ export function computeDelta(current: number, previous: number): number | null {
 }
 
 export function toISODate(d: Date): string {
+  // Guard contre Invalid Date : toISOString() throw `RangeError: Invalid time
+  // value` si la date est invalide. Renvoyer une chaîne vide est plus sûr
+  // que de faire crasher l'app (les filtres date acceptent "").
+  if (Number.isNaN(d.getTime())) return "";
   return d.toISOString().slice(0, 10);
 }
 

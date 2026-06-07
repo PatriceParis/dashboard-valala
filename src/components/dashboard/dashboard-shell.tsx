@@ -152,10 +152,16 @@ export function DashboardShell({ data }: DashboardShellProps) {
     [filteredCampaigns],
   );
 
-  // Compute previous period of same length, immediately before
+  // Compute previous period of same length, immediately before.
+  // Garde-fou : si range.start/end ne sont pas des ISO valides, on retourne
+  // la même range que la courante (=> delta = 0) plutôt que de propager des
+  // Invalid Date qui font crasher `toISOString()` en aval.
   const { previousStart, previousEnd } = useMemo(() => {
     const startD = new Date(range.start);
     const endD = new Date(range.end);
+    if (Number.isNaN(startD.getTime()) || Number.isNaN(endD.getTime())) {
+      return { previousStart: range.start, previousEnd: range.end };
+    }
     const span = Math.max(1, Math.round((endD.getTime() - startD.getTime()) / 86400000) + 1);
     const prevEnd = addDays(startD, -1);
     const prevStart = addDays(prevEnd, -(span - 1));
