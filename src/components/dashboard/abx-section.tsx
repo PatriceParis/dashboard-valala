@@ -108,16 +108,19 @@ export function ABXSection({ data, currency }: Props) {
     </th>
   );
 
-  // Conversions step by step — basées sur le sous-funnel INFLUENCE (post-ABX)
-  // pour la lecture principale. inCRM total reste affiché en contexte.
-  const reachToCrm = funnel.reached > 0 ? funnel.inCRMInfluenced / funnel.reached : 0;
-  const crmToQuoted =
-    funnel.inCRMInfluenced > 0 ? funnel.quotedInfluenced / funnel.inCRMInfluenced : 0;
-  const quotedToWon =
-    funnel.quotedInfluenced > 0 ? funnel.wonInfluenced / funnel.quotedInfluenced : 0;
-  // ROAS = revenue influencé / dépenses ABX 90j (toutes deux figées 90j).
+  // Lecture PRINCIPALE = comptes TOUCHÉS par l'ABX présents au CRM, pipeline et
+  // revenue inclus (y compris comptes déjà clients ré-engagés — cœur de l'ABM/ABX).
+  // L'influence STRICTE (entrées / deals créés post-lancement) est gardée en
+  // sous-couche de transparence, jamais en valeur unique affichée (sinon un deal
+  // sur un compte pré-existant comme Freelance Day disparaît → trompeur).
+  const reachToCrm = funnel.reached > 0 ? funnel.inCRM / funnel.reached : 0;
+  const crmToQuoted = funnel.inCRM > 0 ? funnel.quoted / funnel.inCRM : 0;
+  const quotedToWon = funnel.quoted > 0 ? funnel.won / funnel.quoted : 0;
   const spendABX = funnel.spendEUR;
-  const roas = spendABX > 0 ? funnel.revenueInfluencedEUR / spendABX : 0;
+  // ROAS principal = revenue des comptes touchés / dépenses ABX (touch-attribution).
+  // ROAS plancher = revenue strictement influencé post-ABX (conservateur).
+  const roas = spendABX > 0 ? funnel.revenueEUR / spendABX : 0;
+  const roasFloor = spendABX > 0 ? funnel.revenueInfluencedEUR / spendABX : 0;
   const preexistingInCRM = funnel.inCRM - funnel.inCRMInfluenced;
   const maxFunnel = Math.max(funnel.reached, 1);
 
@@ -134,11 +137,11 @@ export function ABXSection({ data, currency }: Props) {
           </div>
           <div className="text-[11px] muted text-right">
             Snapshot 90 j · {formatNumber(funnel.reached)} entreprises<br />
-            <span className="text-[10px]">Influence = entrée CRM / deal créé après le {formatDate(funnel.abxLaunchDate)} (lancement ABX)</span>
+            <span className="text-[10px]">« dont post-ABX » = entrée CRM / deal créé après le {formatDate(funnel.abxLaunchDate)} (lancement ABX)</span>
           </div>
         </div>
 
-        {/* Visual funnel — 4 bars decreasing (lecture = influence post-ABX) */}
+        {/* Visual funnel — lecture = comptes touchés (total), « dont post-ABX » en contexte */}
         <div className="space-y-2">
           <FunnelBar
             label="Touchées"
@@ -149,63 +152,62 @@ export function ABXSection({ data, currency }: Props) {
             color="from-blue-500/40 to-blue-500/10"
           />
           <FunnelBar
-            label="Entrées CRM post-ABX"
-            sublabel="Entrées en CRM après le lancement ABX (influence réelle)"
-            count={funnel.inCRMInfluenced}
+            label="Présentes en CRM"
+            sublabel="Comptes touchés retrouvés dans HubSpot"
+            count={funnel.inCRM}
             rate={reachToCrm}
-            width={funnel.inCRMInfluenced / maxFunnel}
+            width={funnel.inCRM / maxFunnel}
             color="from-indigo-500/40 to-indigo-500/10"
-            rateLabel={`${formatPercentage(reachToCrm)} des touchées${preexistingInCRM > 0 ? ` · + ${formatNumber(preexistingInCRM)} déjà clientes` : ""}`}
+            rateLabel={`${formatPercentage(reachToCrm)} des touchées · dont ${formatNumber(funnel.inCRMInfluenced)} post-ABX`}
           />
           <FunnelBar
-            label="Devis ouvert"
-            sublabel="Deal actif créé post-ABX"
-            count={funnel.quotedInfluenced}
+            label="Avec deal actif"
+            sublabel="Au moins un deal ouvert (non clôturé)"
+            count={funnel.quoted}
             rate={crmToQuoted}
-            width={funnel.quotedInfluenced / maxFunnel}
+            width={funnel.quoted / maxFunnel}
             color="from-purple-500/40 to-purple-500/10"
-            rateLabel={`${formatPercentage(crmToQuoted)} des entrées post-ABX`}
+            rateLabel={`${formatPercentage(crmToQuoted)} du CRM · dont ${formatNumber(funnel.quotedInfluenced)} post-ABX`}
           />
           <FunnelBar
             label="Gagnées"
-            sublabel="Closed-won créé post-ABX (somme des commandes)"
-            count={funnel.wonInfluenced}
+            sublabel="Closed-won (somme des commandes)"
+            count={funnel.won}
             rate={quotedToWon}
-            width={funnel.wonInfluenced / maxFunnel}
+            width={funnel.won / maxFunnel}
             color="from-emerald-500/40 to-emerald-500/10"
-            rateLabel={`${formatPercentage(quotedToWon)} des devis`}
+            rateLabel={`${formatPercentage(quotedToWon)} des devis · dont ${formatNumber(funnel.wonInfluenced)} post-ABX`}
           />
         </div>
         {preexistingInCRM > 0 && (
           <p className="text-[10px] muted mt-3">
-            {formatNumber(preexistingInCRM)} entreprise{preexistingInCRM > 1 ? "s" : ""} touchée{preexistingInCRM > 1 ? "s" : ""} {preexistingInCRM > 1 ? "étaient" : "était"} déjà en CRM avant l&apos;ABX :
-            comptée{preexistingInCRM > 1 ? "s" : ""} comme touchée{preexistingInCRM > 1 ? "s" : ""} mais exclue{preexistingInCRM > 1 ? "s" : ""} du pipeline / revenue influencés et du ROAS.
+            Sur les {formatNumber(funnel.inCRM)} comptes en CRM, {formatNumber(preexistingInCRM)} {preexistingInCRM > 1 ? "étaient déjà clients" : "était déjà client"} avant l&apos;ABX (relation ré-engagée par les campagnes), {formatNumber(funnel.inCRMInfluenced)} {funnel.inCRMInfluenced > 1 ? "sont de nouvelles entrées" : "est une nouvelle entrée"} post-ABX. Les deux lectures sont affichées : montant total touché + « dont post-ABX » (influence strictement nouvelle).
           </p>
         )}
       </div>
 
-      {/* ===== Bloc 2 — KPIs financiers (influence post-ABX) ===== */}
+      {/* ===== Bloc 2 — KPIs financiers : comptes touchés (total) + dont post-ABX ===== */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <KpiCard
-          label="Pipeline influencé"
-          value={formatCurrency(funnel.pipelineInfluencedEUR, currency)}
-          sub={`Deals créés post-ABX · ${formatNumber(funnel.quotedInfluenced)} entreprise${funnel.quotedInfluenced > 1 ? "s" : ""}`}
+          label="Pipeline comptes touchés"
+          value={formatCurrency(funnel.pipelineEUR, currency)}
+          sub={`${formatNumber(funnel.quoted)} entreprise${funnel.quoted > 1 ? "s" : ""} · dont ${formatCurrency(funnel.pipelineInfluencedEUR, currency)} post-ABX`}
           accent="indigo"
         />
         <KpiCard
-          label="Revenue influencé"
-          value={formatCurrency(funnel.revenueInfluencedEUR, currency)}
-          sub={
-            funnel.wonInfluenced > 0
-              ? `Closed-won post-ABX · ${formatNumber(funnel.wonInfluenced)} entreprise${funnel.wonInfluenced > 1 ? "s" : ""}${funnel.wonInfluenced < 3 ? " (échantillon faible)" : ""}`
-              : "Aucun deal gagné post-ABX à date"
-          }
+          label="Revenue comptes touchés"
+          value={formatCurrency(funnel.revenueEUR, currency)}
+          sub={`${formatNumber(funnel.won)} gagnée${funnel.won > 1 ? "s" : ""} · dont ${formatCurrency(funnel.revenueInfluencedEUR, currency)} post-ABX`}
           accent="emerald"
         />
         <KpiCard
           label="ROAS (90j)"
-          value={spendABX > 0 && funnel.wonInfluenced > 0 ? `${roas.toFixed(2)}×` : "—"}
-          sub={`Revenue influencé / Dépenses ABX 90j : ${formatCurrency(spendABX, currency)}`}
+          value={spendABX > 0 && funnel.revenueEUR > 0 ? `${roas.toFixed(2)}×` : "—"}
+          sub={
+            spendABX > 0
+              ? `Revenue touché / Dépenses ABX ${formatCurrency(spendABX, currency)} · plancher post-ABX ${funnel.revenueInfluencedEUR > 0 ? `${roasFloor.toFixed(2)}×` : "—"}`
+              : "Dépenses ABX indisponibles"
+          }
           accent="orange"
         />
       </div>
